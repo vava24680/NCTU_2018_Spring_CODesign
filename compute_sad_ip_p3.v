@@ -142,8 +142,8 @@
     localparam DATAWIDTH = 32;
     localparam PIXELWIDTH = 8;
     localparam totalElements = 1024;
-    localparam totalAdderRounds = 16;
-    localparam totalRounds = 1 + 1 + totalAdderRounds;
+    localparam totalAdderRounds = 7;
+    localparam totalRounds = 1 + totalAdderRounds + 7;
     integer outerLoopIndex;
     integer innerLoopIndex;
     integer i;
@@ -162,27 +162,14 @@
     reg [DATAWIDTH - 1:0] absoluteDifference[WIDTH - 1:0][HEIGHT - 1:0];
 
     // Register for 10-level adder tree
-    /*reg [DATAWIDTH - 1:0] adder1_result[512:0];
-    reg [DATAWIDTH - 1:0] adder2_result[256:0];
-    reg [DATAWIDTH - 1:0] adder3_result[128:0];
-    reg [DATAWIDTH - 1:0] adder4_result[64:0];
-    reg [DATAWIDTH - 1:0] adder5_result[32:0];
-    reg [DATAWIDTH - 1:0] adder6_result[16:0];
-    reg [DATAWIDTH - 1:0] adder7_result[8:0];
-    reg [DATAWIDTH - 1:0] adder8_result[4:0];
-    reg [DATAWIDTH - 1:0] adder9_result[2:0];
-    reg [DATAWIDTH - 1:0] adder10_result;*/
-    reg [DATAWIDTH - 1:0] adder1_result[256:0];
-    reg [DATAWIDTH - 1:0] adder2_result[128:0];
-    reg [DATAWIDTH - 1:0] adder3_result[64:0];
-    reg [DATAWIDTH - 1:0] adder4_result[32:0];
-    reg [DATAWIDTH - 1:0] adder5_result[16:0];
-    reg [DATAWIDTH - 1:0] adder6_result[8:0];
-    reg [DATAWIDTH - 1:0] adder7_result[4:0];
-    reg [DATAWIDTH - 1:0] adder8_result[2:0];
-
-    reg [DATAWIDTH - 1:0] firstRoundAdderResult;
-    reg [DATAWIDTH - 1:0] secondRoundAdderResult;
+    reg [DATAWIDTH - 1:0] adder1_result[64 - 1:0];
+    reg [DATAWIDTH - 1:0] adder2_result[32 - 1:0];
+    reg [DATAWIDTH - 1:0] adder3_result[16 - 1:0];
+    reg [DATAWIDTH - 1:0] adder4_result[8 - 1:0];
+    reg [DATAWIDTH - 1:0] adder5_result[4 - 1:0];
+    reg [DATAWIDTH - 1:0] adder6_result[2 - 1:0];
+    reg [DATAWIDTH - 1:0] adder7_result;
+    reg [DATAWIDTH - 1:0] totalAdderResult;
 
     // Wire for storing the signal from slv_reg8(regBank)
     wire [DATAWIDTH - 1:0] regBankPointer;
@@ -389,10 +376,19 @@
                     end
                 else
                     begin
-                        if( counter == totalRounds)
+                        slv_reg0 <= slv_reg0;
+                        slv_reg1 <= slv_reg1;
+                        slv_reg2 <= slv_reg2;
+                        slv_reg3 <= slv_reg3;
+                        slv_reg4 <= slv_reg4;
+                        slv_reg5 <= slv_reg5;
+                        slv_reg6 <= slv_reg6;
+                        slv_reg7 <= slv_reg7;
+                        slv_reg8 <= slv_reg8;
+                        if( counter == (totalRounds + 1) ) // plus 1 is because have to add all results together
                             begin
                                 slv_reg9 <= 32'd0;
-                                slv_reg10 <= 32'd0;
+                                slv_reg10 <= totalAdderResult;
                             end
                         else
                             begin
@@ -601,13 +597,13 @@
             end
     end*/
     always @ (posedge S_AXI_ACLK) begin
-        if( S_AXI_ARESETN )
+        if( S_AXI_ARESETN == 1'b0 )
             begin
                 for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex  = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                groupImg[outerLoopIndex][innerLoopIndex] <= 32'd0;
+                                groupImg[outerLoopIndex][innerLoopIndex] <= 32'd1;
                             end
                     end
             end
@@ -681,12 +677,12 @@
     end*/
 
     always @ (posedge S_AXI_ACLK) begin
-        if( S_AXI_ARESETN )
+        if( S_AXI_ARESETN == 1'b0 )
             begin
                 for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                            faceImg[outerLoopIndex][innerLoopIndex] <= faceImg[outerLoopIndex][innerLoopIndex];
+                            faceImg[outerLoopIndex][innerLoopIndex] <= 32'd1;
                     end
             end
         else
@@ -1007,96 +1003,120 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < HEIGHT; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                absoluteDifference[outerLoopIndex][innerLoopIndex] <= Difference[outerLoopIndex][innerLoopIndex][8] == 1'b1 ? {15'b0, 9'b0 - Difference[outerLoopIndex][innerLoopIndex]} : {16'b0, Difference[outerLoopIndex][innerLoopIndex][7:0]};
+                                absoluteDifference[outerLoopIndex][innerLoopIndex] <= Difference[outerLoopIndex][innerLoopIndex][8] == 1'b1 ? -Difference[outerLoopIndex][innerLoopIndex] : {16'b0, Difference[outerLoopIndex][innerLoopIndex][7:0]};
                             end
                     end
             end
     end
 
-    // 2nd-stage, 1st-level adder tree, 512
+    // 2nd-stage, 1st-level adder tree, 256
     always @ (posedge S_AXI_ACLK) begin
-        if(counter < 6'd9)
-            begin
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT / 2; outerLoopIndex = outerLoopIndex + 1)
+        case(counter[2:0])
+            3'd0:
+                for(outerLoopIndex = HEIGHT / 8 * 7; outerLoopIndex < HEIGHT / 8 * 8; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
-            end
-        else
-            begin
-                for(outerLoopIndex = HEIGHT / 2; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+            3'd1:
+                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT / 8 * 1; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
-            end
+            3'd2:
+                for(outerLoopIndex = HEIGHT / 8 * 1; outerLoopIndex < HEIGHT / 8 * 2; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+            3'd3:
+                for(outerLoopIndex = HEIGHT / 8 * 2; outerLoopIndex < HEIGHT / 8 * 3; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+            3'd4:
+                for(outerLoopIndex = HEIGHT / 8 * 3; outerLoopIndex < HEIGHT / 8 * 4; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+            3'd5:
+                for(outerLoopIndex = HEIGHT / 8 * 4; outerLoopIndex < HEIGHT / 8 * 5; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+            3'd6:
+                for(outerLoopIndex = HEIGHT / 8 * 5; outerLoopIndex < HEIGHT / 8 * 6; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+            3'd7:
+                for(outerLoopIndex = HEIGHT / 8 * 6; outerLoopIndex < HEIGHT / 8 * 7; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
+                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                    end
+        endcase
     end
     // End of 1st-level adder tree
 
-    // 3rd-stage, 2nd-level adder tree, 256
+    // 3rd-stage, 2nd-level adder tree, 64
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 8; outerLoopIndex = outerLoopIndex + 1)
-            begin
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 32; outerLoopIndex = outerLoopIndex + 1)
                 adder2_result[outerLoopIndex] <= adder1_result[outerLoopIndex * 2] + adder1_result[outerLoopIndex * 2 + 1];
-            end
     end
     // End of 2nd-level adder tree
 
-    // 4th-stage, 3rd-level adder tree, 128
+    // 4th-stage, 3rd-level adder tree, 32
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 16; outerLoopIndex = outerLoopIndex + 1)
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 64; outerLoopIndex = outerLoopIndex + 1)
             adder3_result[outerLoopIndex] <= adder2_result[outerLoopIndex * 2] + adder2_result[outerLoopIndex * 2 + 1];
     end
     // End of 3rd-level adder tree
 
-    //5th-stage, 4th-level adder tree, 64
+    //5th-stage, 4th-level adder tree, 16
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 32; outerLoopIndex = outerLoopIndex + 1)
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 128; outerLoopIndex = outerLoopIndex + 1)
             adder4_result[outerLoopIndex] <= adder3_result[outerLoopIndex * 2] + adder3_result[outerLoopIndex * 2 + 1];
     end
     // End of 4th-level adder tree
 
-    // 6th-stage, 5th-level adder tree, 32
+    // 6th-stage, 5th-level adder tree, 8
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 64; outerLoopIndex = outerLoopIndex + 1)
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 256; outerLoopIndex = outerLoopIndex + 1)
             adder5_result[outerLoopIndex] <= adder4_result[outerLoopIndex * 2] + adder4_result[outerLoopIndex * 2 + 1];
     end
     // End of 5th-level adder tree
 
-    // 7th-stage, 6th-level adder tree, 16
+    // 7th-stage, 6th-level adder tree, 4
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 128; outerLoopIndex = outerLoopIndex + 1)
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 512; outerLoopIndex = outerLoopIndex + 1)
             adder6_result[outerLoopIndex] <= adder5_result[outerLoopIndex * 2] + adder5_result[outerLoopIndex * 2 + 1];
     end
     // End of 6th-level adder tree
 
-    // 8th-stage, 7th-level adder tree, 8
+    // 8th-stage, 7th-level adder tree, 2
     always @ ( posedge S_AXI_ACLK ) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 256; outerLoopIndex = outerLoopIndex + 1)
-            adder7_result[outerLoopIndex] <= adder6_result[outerLoopIndex * 2] + adder6_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 1024; outerLoopIndex = outerLoopIndex + 1)
+            adder7_result <= adder6_result[outerLoopIndex * 2] + adder6_result[outerLoopIndex * 2 + 1];
     end
     // End of 7th-level adder tree
 
-    // 9th-stage, 8th-level adder tree, 4
-    always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 512; outerLoopIndex = outerLoopIndex + 1)
-            adder8_result[outerLoopIndex] <= adder7_result[outerLoopIndex * 2] + adder7_result[outerLoopIndex * 2 + 1];
+    always @ ( posedge S_AXI_ACLK ) begin
+        if( S_AXI_ARESETN == 1'b0 )
+            totalAdderResult <= 32'd0;
+        else if( counter >= 6'd8 && counter <= 6'd15 )
+            totalAdderResult <= totalAdderResult + adder7_result;
+        else if( counter == (totalRounds + 1) )
+            totalAdderResult <= 32'd0;
+        else
+            totalAdderResult <= totalAdderResult;
     end
 
-    // 10th-stage, 9th-level adder tree, 2
-    always @ (posedge S_AXI_ACLK) begin
-        if(counter > 6'd9)
-            begin
-                firstRoundAdderResult <= firstRoundAdderResult;
-                secondRoundAdderResult <= adder8_result[0] + adder8_result[1];
-            end
-        else
-            begin
-                firstRoundAdderResult <= adder8_result[0] + adder8_result[1];
-                secondRoundAdderResult <= secondRoundAdderResult;
-            end
-    end
     // User logic ends
 
     endmodule
