@@ -142,15 +142,15 @@
     localparam DATAWIDTH = 32;
     localparam PIXELWIDTH = 8;
     localparam totalElements = 1024;
-    localparam totalAdderRounds = 7;
-    localparam totalRounds = 1 + totalAdderRounds + 7;
+    localparam totalAdderRounds = 8;
+    localparam totalRounds = 1 + totalAdderRounds + 3;
     integer outerLoopIndex;
     integer innerLoopIndex;
     integer i;
 
     // Registers buffer for face and group images
-    reg signed [PIXELWIDTH :0] faceImg[WIDTH - 1:0][HEIGHT - 1:0];
-    reg signed [PIXELWIDTH :0] groupImg[WIDTH - 1:0][HEIGHT - 1:0];
+    reg [PIXELWIDTH :0] faceImg[WIDTH - 1:0][HEIGHT - 1:0];
+    reg [PIXELWIDTH :0] groupImg[WIDTH - 1:0][HEIGHT - 1:0];
 
     // Register for FSM
     reg [5:0] counter;
@@ -161,14 +161,15 @@
     // Register for storing the absolute difference
     reg [DATAWIDTH - 1:0] absoluteDifference[WIDTH - 1:0][HEIGHT - 1:0];
 
-    // Register for 10-level adder tree
-    reg [DATAWIDTH - 1:0] adder1_result[64 - 1:0];
-    reg [DATAWIDTH - 1:0] adder2_result[32 - 1:0];
-    reg [DATAWIDTH - 1:0] adder3_result[16 - 1:0];
-    reg [DATAWIDTH - 1:0] adder4_result[8 - 1:0];
-    reg [DATAWIDTH - 1:0] adder5_result[4 - 1:0];
-    reg [DATAWIDTH - 1:0] adder6_result[2 - 1:0];
-    reg [DATAWIDTH - 1:0] adder7_result;
+    // Register for 8-level adder tree
+    reg [DATAWIDTH - 1:0] adder1_result[128 - 1:0];
+    reg [DATAWIDTH - 1:0] adder2_result[64 - 1:0];
+    reg [DATAWIDTH - 1:0] adder3_result[32 - 1:0];
+    reg [DATAWIDTH - 1:0] adder4_result[16 - 1:0];
+    reg [DATAWIDTH - 1:0] adder5_result[8 - 1:0];
+    reg [DATAWIDTH - 1:0] adder6_result[4 - 1:0];
+    reg [DATAWIDTH - 1:0] adder7_result[2 - 1:0];
+    reg [DATAWIDTH - 1:0] adder8_result;
     reg [DATAWIDTH - 1:0] totalAdderResult;
 
     // Wire for storing the signal from slv_reg8(regBank)
@@ -556,46 +557,6 @@
     end
 
     // Sequential circuit for moving data from interface registers to groupImg
-
-    /*always @ ( posedge S_AXI_ACLK ) begin
-        if(regBankPointer < WIDTH)
-            begin
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        if( regBankPointer == outerLoopIndex )
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < DATAWIDTH / PIXELWIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    begin
-                                        groupImg[outerLoopIndex][0 + innerLoopIndex] <= slv_reg0[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][4 + innerLoopIndex] <= slv_reg1[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][8 + innerLoopIndex] <= slv_reg2[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][12 + innerLoopIndex] <= slv_reg3[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][16 + innerLoopIndex] <= slv_reg4[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][20 + innerLoopIndex] <= slv_reg5[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][24 + innerLoopIndex] <= slv_reg6[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        groupImg[outerLoopIndex][28 + innerLoopIndex] <= slv_reg7[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                    end
-                            end
-                        else
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    begin
-                                        groupImg[outerLoopIndex][innerLoopIndex] <= groupImg[outerLoopIndex][innerLoopIndex];
-                                    end
-                            end
-                    end
-                end
-        else
-            begin
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                            begin
-                                groupImg[outerLoopIndex][innerLoopIndex] <= groupImg[outerLoopIndex][innerLoopIndex];
-                            end
-                    end
-            end
-    end*/
     always @ (posedge S_AXI_ACLK) begin
         if( S_AXI_ARESETN == 1'b0 )
             begin
@@ -635,86 +596,43 @@
     end
 
     // Sequential circuit for moving data from interface registers to faceImg
-
-    /*always @ ( posedge S_AXI_ACLK) begin
-        if( regBankPointer < HEIGHT || regBankPointer > 2 * HEIGHT )
-            begin
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                            begin
-                                faceImg[outerLoopIndex][innerLoopIndex] <= faceImg[outerLoopIndex][innerLoopIndex];
-                            end
-                    end
-            end
-        else
-            begin
-                for(outerLoopIndex = HEIGHT; outerLoopIndex < 2 * HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        if( outerLoopIndex == regBankPointer )
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < DATAWIDTH / PIXELWIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    begin
-                                        faceImg[outerLoopIndex % HEIGHT][0 + innerLoopIndex] <= slv_reg0[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][4 + innerLoopIndex] <= slv_reg1[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][8 + innerLoopIndex] <= slv_reg2[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][12 + innerLoopIndex] <= slv_reg3[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][16 + innerLoopIndex] <= slv_reg4[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][20 + innerLoopIndex] <= slv_reg5[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][24 + innerLoopIndex] <= slv_reg6[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][28 + innerLoopIndex] <= slv_reg7[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                    end
-                            end
-                        else
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    begin
-                                        faceImg[outerLoopIndex % HEIGHT][innerLoopIndex] <= faceImg[outerLoopIndex][innerLoopIndex];
-                                    end
-                            end
-                    end
-            end
-    end*/
-
     always @ (posedge S_AXI_ACLK) begin
-        if( S_AXI_ARESETN == 1'b0 )
-            begin
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                            faceImg[outerLoopIndex][innerLoopIndex] <= 32'd1;
-                    end
-            end
-        else
-            begin
-                for(outerLoopIndex = HEIGHT; outerLoopIndex < 2 * HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        if( outerLoopIndex == regBankPointer )
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < DATAWIDTH / PIXELWIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    begin
-                                        faceImg[outerLoopIndex % HEIGHT][0 + innerLoopIndex] <= slv_reg0[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][4 + innerLoopIndex] <= slv_reg1[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][8 + innerLoopIndex] <= slv_reg2[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][12 + innerLoopIndex] <= slv_reg3[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][16 + innerLoopIndex] <= slv_reg4[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][20 + innerLoopIndex] <= slv_reg5[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][24 + innerLoopIndex] <= slv_reg6[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                        faceImg[outerLoopIndex % HEIGHT][28 + innerLoopIndex] <= slv_reg7[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
-                                    end
-                            end
-                        else
-                            begin
-                                for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
-                                    faceImg[outerLoopIndex % HEIGHT][innerLoopIndex] <= faceImg[outerLoopIndex % HEIGHT][innerLoopIndex];
-                            end
-                    end
-            end
+    if( S_AXI_ARESETN == 1'b0 )
+        begin
+            for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+                begin
+                    for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
+                        faceImg[outerLoopIndex][innerLoopIndex] <= 32'd1;
+                end
+        end
+    else
+        begin
+            for(outerLoopIndex = HEIGHT; outerLoopIndex < 2 * HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+                begin
+                    if( outerLoopIndex == regBankPointer )
+                        begin
+                            for(innerLoopIndex = 0; innerLoopIndex < DATAWIDTH / PIXELWIDTH; innerLoopIndex = innerLoopIndex + 1)
+                                begin
+                                    faceImg[outerLoopIndex % HEIGHT][0 + innerLoopIndex] <= slv_reg0[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][4 + innerLoopIndex] <= slv_reg1[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][8 + innerLoopIndex] <= slv_reg2[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][12 + innerLoopIndex] <= slv_reg3[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][16 + innerLoopIndex] <= slv_reg4[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][20 + innerLoopIndex] <= slv_reg5[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][24 + innerLoopIndex] <= slv_reg6[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                    faceImg[outerLoopIndex % HEIGHT][28 + innerLoopIndex] <= slv_reg7[31 - innerLoopIndex * PIXELWIDTH -: PIXELWIDTH];
+                                end
+                        end
+                    else
+                        begin
+                            for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
+                                faceImg[outerLoopIndex % HEIGHT][innerLoopIndex] <= faceImg[outerLoopIndex % HEIGHT][innerLoopIndex];
+                        end
+                end
+        end
     end
 
     // Combinational circuit for calculating difference
-
-    genvar idx,jdx;
 
     always @ ( * ) begin
         case (regBankPointer)
@@ -723,7 +641,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 0) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 0) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd1:    // First row to compute is at row 2
@@ -731,7 +649,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 1) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 1) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd2:    // First row to compute is at row 3
@@ -739,7 +657,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 2) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 2) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd3:    // First row to compute is at row 4
@@ -747,7 +665,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 3) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 3) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd4:    // First row to compute is at row 5
@@ -755,7 +673,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 4) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 4) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd5:    // First row to compute is at row 6
@@ -763,7 +681,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 5) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 5) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd6:    // First row to compute is at row 7
@@ -771,7 +689,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 6 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 6) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd7:    // First row to compute is at row 8
@@ -779,7 +697,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 7 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 7) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd8:    // First row to compute is at row 9
@@ -787,7 +705,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 8 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 8) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd9:    // First row to compute is at row 10
@@ -795,7 +713,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 9 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 9) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd10:    // First row to compute is at row 11
@@ -803,7 +721,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 10 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 10) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd11:    // First row to compute is at row 12
@@ -811,7 +729,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 11 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 11) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd12:    // First row to compute is at row 13
@@ -819,7 +737,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 12 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 12) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd13:    // First row to compute is at row 14
@@ -827,7 +745,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 13 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 13) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd14:    // First row to compute is at row 15
@@ -835,7 +753,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 14 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 14) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd15:    // First row to compute is at row 16
@@ -843,7 +761,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 15 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 15) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd16:    // First row to compute is at row 17
@@ -851,7 +769,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 16 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 16) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd17:    // First row to compute is at row 18
@@ -859,7 +777,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 17 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 17) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd18:    // First row to compute is at row 19
@@ -867,7 +785,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 18 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 18) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd19:    // First row to compute is at row 20
@@ -875,7 +793,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 19 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 19) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd20:    // First row to compute is at row 21
@@ -883,7 +801,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 20 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 20) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd21: // First row to compute is at row 22
@@ -891,7 +809,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 21 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 21) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd22:    // First row to compute is at row 23
@@ -899,7 +817,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 22 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 22) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd23:    // First row to compute is at row 24
@@ -907,7 +825,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 23 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 23) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd24:    // First row to compute is at row 25
@@ -915,7 +833,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 24 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 24) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd25:    // First row to compute is at row 26
@@ -923,7 +841,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 25 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 25) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd26:    // First row to compute is at row 27
@@ -931,7 +849,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 26 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 26) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd27:    // First row to compute is at row 28
@@ -939,7 +857,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 27 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 27) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd28:    // First row to compute is at row 29
@@ -947,7 +865,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 28 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 28) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd29:    // First row to compute is at row 30
@@ -955,7 +873,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 29 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 29) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd30:    // First row to compute is at row 31
@@ -963,7 +881,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 30 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 30) % 32 ][innerLoopIndex]);
                             end
                     end
             32'd31: // First row to compute is at row 0
@@ -971,7 +889,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 31 ) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 31) % 32 ][innerLoopIndex]);
                             end
                     end
             default: // Default situation
@@ -979,7 +897,7 @@
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                             begin
-                                Difference[outerLoopIndex][innerLoopIndex] = faceImg[outerLoopIndex][innerLoopIndex] - groupImg[ (outerLoopIndex + 1 + 31) % 32 ][innerLoopIndex];
+                                Difference[outerLoopIndex][innerLoopIndex] = $signed(faceImg[outerLoopIndex][innerLoopIndex]) - $signed(groupImg[ (outerLoopIndex + 1 + 31) % 32 ][innerLoopIndex]);
                             end
                     end
         endcase
@@ -989,128 +907,105 @@
     always @ ( posedge S_AXI_ACLK ) begin
         if( S_AXI_ARESETN == 1'b0 )
             begin
-                for(outerLoopIndex = 0; outerLoopIndex < WIDTH; outerLoopIndex = outerLoopIndex + 1)
+                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
-                        for(innerLoopIndex = 0; innerLoopIndex < HEIGHT; innerLoopIndex = innerLoopIndex + 1)
-                            begin
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
                                 absoluteDifference[outerLoopIndex][innerLoopIndex] <= 32'd0;
-                            end
                     end
             end
         else
             begin
-                for(outerLoopIndex = 0; outerLoopIndex < WIDTH; outerLoopIndex = outerLoopIndex + 1)
+                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
-                        for(innerLoopIndex = 0; innerLoopIndex < HEIGHT; innerLoopIndex = innerLoopIndex + 1)
-                            begin
-                                absoluteDifference[outerLoopIndex][innerLoopIndex] <= Difference[outerLoopIndex][innerLoopIndex][8] == 1'b1 ? -Difference[outerLoopIndex][innerLoopIndex] : {16'b0, Difference[outerLoopIndex][innerLoopIndex][7:0]};
-                            end
+                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 1)
+                            absoluteDifference[outerLoopIndex][innerLoopIndex] = (Difference[outerLoopIndex][innerLoopIndex][8] == 1'b1) ? (~Difference[outerLoopIndex][innerLoopIndex] + 1) : Difference[outerLoopIndex][innerLoopIndex];
                     end
             end
     end
 
     // 2nd-stage, 1st-level adder tree, 256
     always @ (posedge S_AXI_ACLK) begin
-        case(counter[2:0])
-            3'd0:
-                for(outerLoopIndex = HEIGHT / 8 * 7; outerLoopIndex < HEIGHT / 8 * 8; outerLoopIndex = outerLoopIndex + 1)
+        case(counter[1:0])
+            2'd0:
+                for(outerLoopIndex = HEIGHT / 4 * 3; outerLoopIndex < HEIGHT / 4 * 4; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) % 256 / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
-            3'd1:
-                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT / 8 * 1; outerLoopIndex = outerLoopIndex + 1)
+            2'd1:
+                for(outerLoopIndex = 0; outerLoopIndex < HEIGHT / 4 * 1; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) % 256 / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
-            3'd2:
-                for(outerLoopIndex = HEIGHT / 8 * 1; outerLoopIndex < HEIGHT / 8 * 2; outerLoopIndex = outerLoopIndex + 1)
+            2'd2:
+                for(outerLoopIndex = HEIGHT / 4 * 1; outerLoopIndex < HEIGHT / 4 * 2; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) % 256 / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
-            3'd3:
-                for(outerLoopIndex = HEIGHT / 8 * 2; outerLoopIndex < HEIGHT / 8 * 3; outerLoopIndex = outerLoopIndex + 1)
+            2'd3:
+                for(outerLoopIndex = HEIGHT / 4 * 2; outerLoopIndex < HEIGHT / 4 * 3; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
-                    end
-            3'd4:
-                for(outerLoopIndex = HEIGHT / 8 * 3; outerLoopIndex < HEIGHT / 8 * 4; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
-                    end
-            3'd5:
-                for(outerLoopIndex = HEIGHT / 8 * 4; outerLoopIndex < HEIGHT / 8 * 5; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
-                    end
-            3'd6:
-                for(outerLoopIndex = HEIGHT / 8 * 5; outerLoopIndex < HEIGHT / 8 * 6; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
-                    end
-            3'd7:
-                for(outerLoopIndex = HEIGHT / 8 * 6; outerLoopIndex < HEIGHT / 8 * 7; outerLoopIndex = outerLoopIndex + 1)
-                    begin
-                        for(innerLoopIndex = 0; innerLoopIndex < WIDTH; innerLoopIndex = innerLoopIndex + 2)
-                            adder1_result[ (outerLoopIndex * WIDTH + innerLoopIndex) / 2 % 128 ] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
+                            adder1_result[(outerLoopIndex * WIDTH + innerLoopIndex) % 256 / 2] <= absoluteDifference[outerLoopIndex][innerLoopIndex] + absoluteDifference[outerLoopIndex][innerLoopIndex + 1];
                     end
         endcase
     end
     // End of 1st-level adder tree
 
-    // 3rd-stage, 2nd-level adder tree, 64
+    // 3rd-stage, 2nd-level adder tree, 128
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 32; outerLoopIndex = outerLoopIndex + 1)
-                adder2_result[outerLoopIndex] <= adder1_result[outerLoopIndex * 2] + adder1_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 16; outerLoopIndex = outerLoopIndex + 1)
+            adder2_result[outerLoopIndex] <= adder1_result[outerLoopIndex] + adder1_result[outerLoopIndex + 1];
     end
     // End of 2nd-level adder tree
 
-    // 4th-stage, 3rd-level adder tree, 32
+    // 4th-stage, 3rd-level adder tree, 64
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 64; outerLoopIndex = outerLoopIndex + 1)
-            adder3_result[outerLoopIndex] <= adder2_result[outerLoopIndex * 2] + adder2_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 32; outerLoopIndex = outerLoopIndex + 1)
+            adder3_result[outerLoopIndex] <= adder2_result[outerLoopIndex] + adder2_result[outerLoopIndex + 1];
     end
     // End of 3rd-level adder tree
 
-    //5th-stage, 4th-level adder tree, 16
+    //5th-stage, 4th-level adder tree, 32
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 128; outerLoopIndex = outerLoopIndex + 1)
-            adder4_result[outerLoopIndex] <= adder3_result[outerLoopIndex * 2] + adder3_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 64; outerLoopIndex = outerLoopIndex + 1)
+            adder4_result[outerLoopIndex] <= adder3_result[outerLoopIndex] + adder3_result[outerLoopIndex + 1];
     end
     // End of 4th-level adder tree
 
-    // 6th-stage, 5th-level adder tree, 8
+    // 6th-stage, 5th-level adder tree, 16
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 256; outerLoopIndex = outerLoopIndex + 1)
-            adder5_result[outerLoopIndex] <= adder4_result[outerLoopIndex * 2] + adder4_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 128; outerLoopIndex = outerLoopIndex + 1)
+            adder5_result[outerLoopIndex] <= adder4_result[outerLoopIndex] + adder4_result[outerLoopIndex + 1];
     end
     // End of 5th-level adder tree
 
-    // 7th-stage, 6th-level adder tree, 4
+    // 7th-stage, 6th-level adder tree, 8
     always @ (posedge S_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 512; outerLoopIndex = outerLoopIndex + 1)
-            adder6_result[outerLoopIndex] <= adder5_result[outerLoopIndex * 2] + adder5_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 256; outerLoopIndex = outerLoopIndex + 1)
+            adder6_result[outerLoopIndex] <= adder5_result[outerLoopIndex] + adder5_result[outerLoopIndex + 1];
     end
     // End of 6th-level adder tree
 
-    // 8th-stage, 7th-level adder tree, 2
+    // 8th-stage, 7th-level adder tree, 4
     always @ ( posedge S_AXI_ACLK ) begin
-        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 1024; outerLoopIndex = outerLoopIndex + 1)
-            adder7_result <= adder6_result[outerLoopIndex * 2] + adder6_result[outerLoopIndex * 2 + 1];
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 512; outerLoopIndex = outerLoopIndex + 1)
+            adder7_result[outerLoopIndex] <= adder6_result[outerLoopIndex] + adder6_result[outerLoopIndex + 1];
     end
     // End of 7th-level adder tree
 
     always @ ( posedge S_AXI_ACLK ) begin
+        for(outerLoopIndex = 0; outerLoopIndex < totalElements / 1024; outerLoopIndex = outerLoopIndex + 1)
+            adder8_result <= adder7_result[outerLoopIndex] + adder7_result[outerLoopIndex + 1];
+    end
+
+    always @ ( posedge S_AXI_ACLK ) begin
         if( S_AXI_ARESETN == 1'b0 )
             totalAdderResult <= 32'd0;
-        else if( counter >= 6'd8 && counter <= 6'd15 )
-            totalAdderResult <= totalAdderResult + adder7_result;
+        else if( counter >= 6'd9 &&  counter <= 6'd12)
+            totalAdderResult <= totalAdderResult + adder8_result;
         else if( counter == (totalRounds + 1) )
             totalAdderResult <= 32'd0;
         else
