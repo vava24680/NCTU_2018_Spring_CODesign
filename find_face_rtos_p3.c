@@ -240,10 +240,12 @@ void insertion_sort(uint8 *pix_array, int size)
 void cpy_face_img(uint8 * face)
 {
 	int loopIndex;
+	uint8 zero_array[32] = {0};
 	for(loopIndex = FACE_HEIGHT; loopIndex < 2 * FACE_HEIGHT; loopIndex++)
 	{
 		*regBankRegister = loopIndex;
-		memcpy((void *)interfaceRegisters, face + (loopIndex % FACE_HEIGHT) * FACE_WIDTH, 32);
+		//memcpy((void *)interfaceRegisters, face + (loopIndex % FACE_HEIGHT) * FACE_WIDTH, 32);
+		memcpy((void *)interfaceRegisters, zero_array, 32);
 	}
 }
 
@@ -267,13 +269,19 @@ void median3x3(uint8 *image, int width, int height)
 int32 compute_sad(uint8* group, int width, int row, int col)
 {
 	unsigned int loopIndex = 0;
-    int zero_array[32]={0};
+	uint8 non_zero_array[32];
+	int i;
+	for(i = 0; i < 32; ++i)
+	{
+		non_zero_array[i] = 2;
+	}
 	if(row == 0)
 	{
 		for(loopIndex = 0; loopIndex < FACE_HEIGHT; loopIndex++)
 		{
 			*regBankRegister = loopIndex;
-			memcpy((void *)interfaceRegisters, zero_array/*group + loopIndex * width + col*/, 32);
+			//memcpy((void *)interfaceRegisters, group + loopIndex * width + col, 32);
+			memcpy((void *)interfaceRegisters, non_zero_array, 32);
 		}
 	}
 	else
@@ -293,9 +301,11 @@ int32 match(CImage *group, CImage *face, int *posx, int *posy)
 	int32  sad, min_sad;
 
 	min_sad = 256*face->width*face->height;
-	for (col = 0; col < 1/*(group->width - face->width + 1)*/; col++)
+	//for (col = 0; col < (group->width - face->width + 1); col++)
+	for (col = 0; col < 1; col++)
 	{
-		for (row = 0; row < 1/*(group->height - face->height + 1)*/; row++)
+		//for (row = 0; row < (group->height - face->height + 1); row++)
+		for (row = 0; row < 1; row++)
 		{
 			sad = compute_sad(group->pix, group->width, row, col);
 			if(sad < min_sad)
