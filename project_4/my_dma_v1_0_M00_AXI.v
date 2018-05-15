@@ -167,6 +167,25 @@
     // number of write or read transaction.
     localparam integer C_TRANSACTIONS_NUM = clogb2(C_M_AXI_BURST_LEN-1);
 
+    //localparam  integer MAX_BURST_LEN = 64;;
+
+    function [5 - 1:0] clz_result;
+    input [32 - 1:0] number;
+    reg [16 - 1:0] val16;
+    reg [8 - 1:0] val8;
+    reg [4 - 1:0] val4;
+        begin
+            clz_result[4] = (number[31:16] == 16'd0);
+            val16 = clz_result[4] ? number[15:0] : number[31:16];
+            clz_result[3] = (val16[15:8] == 8'd0);
+            val8 = clz_result[4] ? val16[7:0] : val16[15:8];
+            clz_result[2] = (val8[7:4] == 4'd0);
+            val4 = clz_result[2] ? val8[3:0] : val8[7:4];
+            clz_result[1] = (val4[3:2] == 2'b0);
+            clz_result[0] = clz_result[1] ? ~val4[1] : ~val4[3];
+        end
+    endfunction
+
     // Example State machine to initialize counter, initialize write transactions,
     // initialize read transactions and comparison of read data with the
     // written data words.
@@ -231,8 +250,12 @@
     // The internal buffer to store one burst of data.
     // You MUST change this burst buffer to SRAM for lab4.
     reg [C_M_AXI_DATA_WIDTH-1:0] buffer [0:C_M_AXI_BURST_LEN-1];
+    //reg [C_M_AXI_DATA_WIDTH-1:0] buffer [0:MAX_BURST_LEN-1];
 
+    // Record how many words are not transferred yet
     reg [32 - 1:0] numberOfWordLeft;
+    wire numberOfLeadingZero;
+    assign numberOfLeadingZero = clz_result(numberOfWordLeft);
 
     // I/O Connections assignments
     //I/O Connections. Write Address (AW)
@@ -269,6 +292,7 @@
     assign M_AXI_ARADDR	= /* C_M_TARGET_SLAVE_BASE_ADDR + */ axi_araddr;
     //Burst LENgth is number of transaction beats, minus 1
     assign M_AXI_ARLEN      = C_M_AXI_BURST_LEN - 1;
+    //asiign M_AXI_ARLEN    = axi_awlen - 1;
     //Size should be C_M_AXI_DATA_WIDTH, in 2^n bytes, otherwise narrow bursts are used
     assign M_AXI_ARSIZE     = clogb2((C_M_AXI_DATA_WIDTH/8)-1);
     //INCR burst type is usually used, except for keyhole bursts
@@ -303,6 +327,7 @@
         else
             begin
                 init_txn_ff <= hw_active;
+                //init_txn_ff <= ((!mst_exec_state) & hw_active) || (mst_exec_state == COPY_DONE);
                 init_txn_ff2 <= init_txn_ff;
             end
       end
@@ -583,7 +608,7 @@
                 start_single_burst_write <= 1'b0;
                 start_single_burst_read  <= 1'b0;
                 hw_done <= 0;
-                //axi_awlen <= 8'd16;
+                //axi_awlen <= 8'd64;
             end
         else
             begin
@@ -603,11 +628,28 @@
                             hw_done <= 0;
                         end
                     /* New state-transition code
-                        if(hw_active == 1'b1)
+                        if( init_txn_pulse & hw_active )
                             begin
-                                axi_awlen <= 32'd16;
+                                case (clz_result(len_copy))
+                                    31:
+                                        axi_awlen <= 8'd1;
+                                    30:
+                                        axi_awlen <= 8'd2;
+                                    29:
+                                        axi_awlen <= 8'd4;
+                                    28:
+                                        axi_awlen <= 8'd8;
+                                    27:
+                                        axi_awlen <= 8'd16;
+                                    28:
+                                        axi_awlen <= 8'd32;
+                                    29:
+                                        axi_awlen <= 8'd64;
+                                    default:
+                                        axi_awlen <= 8'd64;
+                                endcase
                                 mst_exec_state <= INIT_READ;
-                                hw_done = 1'b0;
+                                hw_done <= 1'b0;
                                 numberOfWordLeft <= len_copy;
                             end
                         else
@@ -636,27 +678,31 @@
                                 start_single_burst_read <= 1'b0; //Negate to generate a pulse
                         end
                     /* New state-transition code
-                        if(numberOfWordLeft >= 32'd16)
-                            begin
-                                axi_awlen <= 32'd16;
-                            end
-                        else if(numberOfWordLeft >= 32'd8)
-                            begin
-                                axi_awlen <= 32'd8;
-                            end
-                        else if(numberOfWordLeft >= 32'd4)
-                            begin
-                                axi_awlen <= 32'd4;
-                            end
-                        else if(numberOfWordLeft >= 32'd2)
-                            begin
-                                axi_awlen <= 32'd2;
-                            end
-                        else
-                            begin
-                                axi_awlen <= 32'd1;
-                            end
+                    if(M_AXI_ARREADY && axi_arvalid)
+                        begin
+                            numberOfLeadingZero <= numberOfLeadingZero - axi_awlen;
+                            mst_exec_state <= READING;
+                        end
+                    else
+                        begin
+                            mst_exec_state <= INIT_READ;
+                            if (~axi_arvalid && ~burst_read_active && ~start_single_burst_read)
+                                start_single_burst_read <= 1'b1;
+                            else
+                                start_single_burst_read <= 1'b0; //Negate to generate a pulse
+                        end
                     */
+                /*
+                READING:
+                    if(reads_done)
+                        begin
+                            mst_exec_state <= INIT_WRITE;
+                        end
+                    else
+                        begin
+                            mst_exec_state <= READING;
+                        end
+                */
                 INIT_WRITE:
                     // This state is responsible to issue start_single_write pulse to
                     // initiate a write transaction. Write transactions will be
@@ -676,6 +722,20 @@
                             else
                                 start_single_burst_write <= 1'b0; //Negate to generate a pulse
                         end
+                    /* New state-transition code
+                    if(M_AXI_AWREADY && axi_awvalid)
+                        begin
+                            mst_exec_state <= WRITING;
+                        end
+                    else
+                        begin
+                            mst_exec_state <= INIT_WRITE;
+                            if (~axi_awvalid && ~start_single_burst_write && ~burst_write_active)
+                                start_single_burst_write <= 1'b1;
+                            else
+                                start_single_burst_write <= 1'b0; //Negate to generate a pulse
+                        end
+                    */
                 COPY_DONE:
                     // This state is responsible to issue the state of comparison
                     // of written data with the read data. If no error flags are set,
@@ -685,15 +745,35 @@
                         mst_exec_state <= IDLE;
                         hw_done <= 1;
                     end
-                    /*
-                    if (counter == 0)
+                    /* New state-transition code
+                    if(numberOfWordLeft != 32'd0)
                         begin
-                            mst_exec_state <= IDLE;
-                            hw_done <= 1'b1;
+                            case (numberOfLeadingZero)
+                                31:
+                                    axi_awlen <= 8'd1;
+                                30:
+                                    axi_awlen <= 8'd2;
+                                29:
+                                    axi_awlen <= 8'd4;
+                                28:
+                                    axi_awlen <= 8'd8;
+                                27:
+                                    axi_awlen <= 8'd16;
+                                28:
+                                    axi_awlen <= 8'd32;
+                                29:
+                                    axi_awlen <= 8'd64;
+                                default:
+                                    axi_awlen <= 8'd64;
+                            endcase
+                            mst_exec_state <= INIT_READ;
+                            hw_done <= 0;
                         end
                     else
                         begin
-
+                            axi_awlen <= 8'd64;
+                            mst_exec_state <= IDLE;
+                            hw_done <= 1;
                         end
                     */
                 default :
