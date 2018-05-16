@@ -167,7 +167,8 @@
     // number of write or read transaction.
     localparam integer C_TRANSACTIONS_NUM = clogb2(C_M_AXI_BURST_LEN-1);
 
-    //localparam  integer MAX_BURST_LEN = 64;;
+    //localparam  integer MAX_BURST_LEN = 64;
+    //integer idx;
 
     function [5 - 1:0] clz_result;
     input [32 - 1:0] number;
@@ -191,12 +192,13 @@
     // written data words.
     /*
     parameter [3:0]
-        IDLE = 3'd0,
-        INIT_READ = 3'd1,
-        READING = 3'd2,
-        INIT_WRITE = 3'd3,
-        WRITING = 3'd4,
-        COPY_DONE = 3'd5;
+        IDLE        = 3'd0,
+        INIT_READ   = 3'd1,
+        READING     = 3'd2,
+        INIT_WRITE  = 3'd3,
+        WRITING     = 3'd4,
+        COPY_DONE   = 3'd5;
+        RESET       = 3'd6;
     */
     parameter [1:0]
         IDLE = 2'b00, // This state initiates AXI4 transaction
@@ -250,12 +252,13 @@
     // The internal buffer to store one burst of data.
     // You MUST change this burst buffer to SRAM for lab4.
     reg [C_M_AXI_DATA_WIDTH-1:0] buffer [0:C_M_AXI_BURST_LEN-1];
-    //reg [C_M_AXI_DATA_WIDTH-1:0] buffer [0:MAX_BURST_LEN-1];
+    //reg [C_M_AXI_DATA_WIDTH - 1:0] buffer [0:MAX_BURST_LEN - 1];
 
     // Record how many words are not transferred yet
-    reg [32 - 1:0] numberOfWordLeft;
-    wire numberOfLeadingZero;
-    assign numberOfLeadingZero = clz_result(numberOfWordLeft);
+    //reg [32 - 1:0] numberOfWordLeft;
+    //reg cleanSignal;
+    //wire numberOfLeadingZero;
+    //assign numberOfLeadingZero = clz_result(numberOfWordLeft);
 
     // I/O Connections assignments
     //I/O Connections. Write Address (AW)
@@ -311,6 +314,7 @@
     //Example design I/O
     //Burst size in bytes
     assign burst_size_bytes = C_M_AXI_BURST_LEN * C_M_AXI_DATA_WIDTH/8;
+    //assign burst_size_bytes = axi_awlen * C_M_AXI_DATA_WIDTH/8;
     // Only when init_txn_ff is 1 and init_txn_ff2 is 0, the init_txn_pulse is 1
     assign init_txn_pulse   = (!init_txn_ff2) && init_txn_ff;
 
@@ -327,7 +331,6 @@
         else
             begin
                 init_txn_ff <= hw_active;
-                //init_txn_ff <= ((!mst_exec_state) & hw_active) || (mst_exec_state == COPY_DONE);
                 init_txn_ff2 <= init_txn_ff;
             end
       end
@@ -344,7 +347,7 @@
     // write commands as fast as it is allowed by the slave/interconnect.
     // The address will be incremented on each accepted address transaction,
     // by burst_size_byte to point to the next address.
-
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -362,6 +365,7 @@
 
     // Next address after AWREADY indicates previous address acceptance
     // In AXI-burst, address need to be transfered only one time.
+    // Can't use cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
@@ -400,6 +404,7 @@
     assign wnext = M_AXI_WREADY & axi_wvalid;
 
     // WVALID logic, similar to the axi_awvalid always block above
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
     if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -418,6 +423,7 @@
 
     // WLAST generation on the MSB of a counter underflow
     // WVALID logic, similar to the axi_awvalid always block above
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -428,6 +434,7 @@
         // with the last write data when write_index is b1111
         // else if (&(write_index[C_TRANSACTIONS_NUM-1:1])&& ~write_index[0] && wnext)
         else if (((write_index == C_M_AXI_BURST_LEN-2 && C_M_AXI_BURST_LEN >= 2) && wnext) || (C_M_AXI_BURST_LEN == 1 ))
+        //else if (((write_index == axi_awlen-2 && axi_awlen >= 2) && wnext) || (axi_awlen == 1 ))
             axi_wlast <= 1'b1;
 
         // Deassrt axi_wlast when the last write data has been
@@ -436,6 +443,7 @@
             axi_wlast <= 1'b0;
         // Especially for the transfer whose burst length is 1
         else if (axi_wlast && C_M_AXI_BURST_LEN == 1)
+        //else if (axi_wlast && axi_awlen == 1)
             axi_wlast <= 1'b0;
         else
             axi_wlast <= axi_wlast;
@@ -443,17 +451,20 @@
 
     /* Burst length counter. Uses extra counter register bit to indicate terminal
     count to reduce decode logic */
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || start_single_burst_write == 1'b1)
             write_index <= 0;
         else if (wnext && (write_index != C_M_AXI_BURST_LEN-1))
+        //else if (wnext && (write_index != axi_awlen - 1))
             write_index <= write_index + 1;
         else
             write_index <= write_index;
     end
 
-  /* Write Data Generator */
+    /* Write Data Generator */
+    // Don't need the cleanSignal to reset it.
     always @(*)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1)
@@ -481,7 +492,7 @@
     //The BRESP bit [1] is used indicate any errors from the interconnect or
     //slave for the entire write burst. This example will capture the error
     //into the ERROR output.
-
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -513,7 +524,7 @@
 
     //In this example, the read address increments in the same
     //manner as the write address channel.
-
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -529,6 +540,7 @@
 
     // Next address after ARREADY indicates previous address acceptance
     // In AXI-burst, address need to be transfered only one time
+    // Can't use the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
@@ -548,11 +560,13 @@
 
     // Burst length counter. Uses extra counter register bit to indicate
     // terminal count to reduce decode logic
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || start_single_burst_read)
             read_index <= 0;
         else if (rnext && (read_index != C_M_AXI_BURST_LEN-1))
+        //else if (rnext && (read_index != axi_awlen - 1))
             read_index <= read_index + 1;
         else
             read_index <= read_index;
@@ -564,6 +578,7 @@
     In this example the data checker is always able to accept
     more data, so no need to throttle the RREADY signal
     */
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 )
@@ -587,9 +602,22 @@
     // Read a data burst into the buffer
     always @(posedge M_AXI_ACLK)
     begin
+        /*
+        if(M_AXI_ARESETN == 1'b0)
+            begin
+                for(idx = 0; idx < MAX_BURST_LEN; idx = idx + 1)
+                    buffer[idx] <= 32'd0;
+            end
+        */
         //Read data when RVALID is active
         if (rnext)
             buffer[read_index] <= M_AXI_RDATA;
+            /*
+            for(idx = 0; idx < MAX_BURST_LEN; idx = idx + 1)
+                begin
+                    buffer[idx] <= (read_index == idx) ? M_AXI_RDATA : buffer[idx];
+                end
+            */
     end
 
     //Flag any read response errors
@@ -628,35 +656,35 @@
                             hw_done <= 0;
                         end
                     /* New state-transition code
-                        if( init_txn_pulse & hw_active )
+                        if( init_txn_pulse )
                             begin
+                                mst_exec_state <= INIT_READ;
+                                hw_done <= 1'b0;
+                                numberOfWordLeft <= len_copy;
                                 case (clz_result(len_copy))
-                                    31:
+                                    5'd31:
                                         axi_awlen <= 8'd1;
-                                    30:
+                                    5'd30:
                                         axi_awlen <= 8'd2;
-                                    29:
+                                    5'd29:
                                         axi_awlen <= 8'd4;
-                                    28:
+                                    5'd28:
                                         axi_awlen <= 8'd8;
-                                    27:
+                                    5'd27:
                                         axi_awlen <= 8'd16;
-                                    28:
+                                    5'd28:
                                         axi_awlen <= 8'd32;
-                                    29:
+                                    5'd29:
                                         axi_awlen <= 8'd64;
                                     default:
                                         axi_awlen <= 8'd64;
                                 endcase
-                                mst_exec_state <= INIT_READ;
-                                hw_done <= 1'b0;
-                                numberOfWordLeft <= len_copy;
                             end
                         else
                             begin
-                                axi_awlen <= 32'd16;
+                                axi_awlen <= 32'd64;
                                 mst_exec_state <= IDLE;
-                                hw_done <= hw_done; // Not sure
+                                hw_done <= 1'b0;
                                 numberOfWordLeft <= 32'd0;
                             end
                     */
@@ -736,6 +764,17 @@
                                 start_single_burst_write <= 1'b0; //Negate to generate a pulse
                         end
                     */
+                /*
+                WRITING:
+                    if(writes_done)
+                        begin
+                            mst_exec_state <= COPY_DONE;
+                        end
+                    else
+                        begin
+                            mst_exec_state <= WRITING;
+                        end
+                */
                 COPY_DONE:
                     // This state is responsible to issue the state of comparison
                     // of written data with the read data. If no error flags are set,
@@ -766,7 +805,7 @@
                                 default:
                                     axi_awlen <= 8'd64;
                             endcase
-                            mst_exec_state <= INIT_READ;
+                            mst_exec_state <= RESET;
                             hw_done <= 0;
                         end
                     else
@@ -776,6 +815,10 @@
                             hw_done <= 1;
                         end
                     */
+                /*
+                RESET:
+                    mst_exec_state <= INIT_READ;
+                */
                 default :
                     begin
                         mst_exec_state  <= IDLE;
@@ -784,9 +827,24 @@
             end
     end //MASTER_EXECUTION_PROC
 
+    // cleanSignal transition
+    /*
+    always @ (posedge M_AXI_ACLK) begin
+        if(M_AXI_ARESETN == 1'b0 || init_txn_pulse == 1'b1)
+            cleanSignal <= 1'b0;
+        else if(mst_exec_state == COPY_DONE)
+            cleanSignal <= 1'b1;
+        else if(cleanSignal == 1'b1)
+            cleanSignal <= 1'b0;
+        else
+            cleanSignal <= cleanSignal;
+    end
+    */
+
     // burst_write_active signal is asserted when there is a burst write transaction
     // is initiated by the assertion of start_single_burst_write. burst_write_active
     // signal remains asserted until the burst write is accepted by the slave
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
@@ -802,14 +860,16 @@
     // This logic is to qualify the last write count with the final write
     // response. This demonstrates how to confirm that a write has been
     // committed.
-
+    // Need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
+        //if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || cleanSignal == 1'b1)
             writes_done <= 1'b0;
         // The writes_done should be associated with a bready response
         // else if (M_AXI_BVALID && axi_bready && (write_burst_counter == {(C_NO_BURSTS_REQ-1){1}}) && axi_wlast)
         else if (M_AXI_BVALID && (write_index == C_M_AXI_BURST_LEN-1) && axi_bready)
+        //else if (M_AXI_BVALID && (write_index == axi_awlen - 1) && axi_bready)
             writes_done <= 1'b1;
         else
             writes_done <= writes_done;
@@ -818,6 +878,7 @@
     // burst_read_active signal is asserted when there is a burst write transaction
     // is initiated by the assertion of start_single_burst_write. start_single_burst_read
     // signal remains asserted until the burst read is accepted by the master
+    // Don't need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
@@ -834,14 +895,16 @@
     // This logic is to qualify the last read count with the final read
     // response. This demonstrates how to confirm that a read has been
     // committed.
-
+    // Need the cleanSignal to reset it.
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
+        //if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || cleanSignal == 1'b1)
             reads_done <= 1'b0;
         //The reads_done should be associated with a rready response
         //else if (M_AXI_BVALID && axi_bready && (write_burst_counter == {(C_NO_BURSTS_REQ-1){1}}) && axi_wlast)
         else if (M_AXI_RVALID && axi_rready && (read_index == C_M_AXI_BURST_LEN-1))
+        //else if (M_AXI_RVALID && axi_rready && (read_index == axi_awlen - 1))
             reads_done <= 1'b1;
         else
             reads_done <= reads_done;
