@@ -165,9 +165,7 @@
 
     // C_TRANSACTIONS_NUM is the width of the index counter for
     // number of write or read transaction.
-    //localparam integer C_TRANSACTIONS_NUM = clogb2(LEN-1);
     localparam integer C_TRANSACTIONS_NUM = clogb2(MAX_BURST_LEN-1);
-    //localparam  LEN = 5;
     localparam  integer MAX_BURST_LEN = 64;
     integer idx;
 
@@ -218,41 +216,40 @@
 
     // AXI4LITE signals
     //AXI4 internal temp signals
-    reg [C_M_AXI_ADDR_WIDTH-1 : 0] 	axi_awaddr;
+    reg [C_M_AXI_ADDR_WIDTH-1 : 0]  axi_awaddr;
     reg [8 - 1:0] axi_awlen;
-    reg  	axi_awvalid;
-    reg [C_M_AXI_DATA_WIDTH-1 : 0] 	axi_wdata;
-    reg  	axi_wlast;
-    reg  	axi_wvalid;
-    reg  	axi_bready;
-    reg [C_M_AXI_ADDR_WIDTH-1 : 0] 	axi_araddr;
-    reg  	axi_arvalid;
-    reg  	axi_rready;
+    reg  axi_awvalid;
+    reg [C_M_AXI_DATA_WIDTH-1 : 0]  axi_wdata;
+    reg  axi_wlast;
+    reg  axi_wvalid;
+    reg  axi_bready;
+    reg [C_M_AXI_ADDR_WIDTH-1 : 0]  axi_araddr;
+    reg  axi_arvalid;
+    reg  axi_rready;
     //write beat count in a burst
-    reg [C_TRANSACTIONS_NUM : 0] 	write_index;
+    reg [C_TRANSACTIONS_NUM : 0]    write_index;
     //read beat count in a burst
-    reg [C_TRANSACTIONS_NUM : 0] 	read_index;
+    reg [C_TRANSACTIONS_NUM : 0]    read_index;
     //size of C_M_AXI_BURST_LEN length burst in bytes
-    wire [C_TRANSACTIONS_NUM+2 : 0] 	burst_size_bytes;
-    reg  	start_single_burst_write;
-    reg  	start_single_burst_read;
-    reg  	writes_done;
-    reg  	reads_done;
-    reg  	burst_write_active;
-    reg  	burst_read_active;
+    wire [C_TRANSACTIONS_NUM+2 : 0] burst_size_bytes;
+    reg start_single_burst_write;
+    reg start_single_burst_read;
+    reg writes_done;
+    reg reads_done;
+    reg burst_write_active;
+    reg burst_read_active;
     //Interface response error flags
-    wire  	write_resp_error;
-    wire  	read_resp_error;
-    wire  	wnext;
-    wire  	rnext;
-    reg  	init_txn_ff;
-    reg  	init_txn_ff2;
-    reg  	init_txn_edge;
-    wire  	init_txn_pulse;
+    wire write_resp_error;
+    wire read_resp_error;
+    wire wnext;
+    wire rnext;
+    reg init_txn_ff;
+    reg init_txn_ff2;
+    reg init_txn_edge;
+    wire init_txn_pulse;
 
     // The internal buffer to store one burst of data.
     // You MUST change this burst buffer to SRAM for lab4.
-    //reg [C_M_AXI_DATA_WIDTH-1:0] buffer [0:LEN-1];
     reg [C_M_AXI_DATA_WIDTH - 1:0] buffer [0:MAX_BURST_LEN - 1];
 
     // Record how many words are not transferred yet
@@ -267,7 +264,6 @@
     //The AXI address is a concatenation of the target base address + active offset range
     assign M_AXI_AWADDR     = /* C_M_TARGET_SLAVE_BASE_ADDR + */ axi_awaddr;
     //Burst LENgth is number of transaction beats, minus 1
-    //assign M_AXI_AWLEN      = LEN - 1;
     assign M_AXI_AWLEN    = axi_awlen - 1;
     //Size should be C_M_AXI_DATA_WIDTH, in 2^SIZE bytes, otherwise narrow bursts are used
     assign M_AXI_AWSIZE     = clogb2((C_M_AXI_DATA_WIDTH/8)-1);
@@ -295,7 +291,6 @@
     assign M_AXI_ARID       = 'b0;
     assign M_AXI_ARADDR	= /* C_M_TARGET_SLAVE_BASE_ADDR + */ axi_araddr;
     //Burst LENgth is number of transaction beats, minus 1
-    //assign M_AXI_ARLEN      = LEN - 1;
     assign M_AXI_ARLEN    = axi_awlen - 1;
     //Size should be C_M_AXI_DATA_WIDTH, in 2^n bytes, otherwise narrow bursts are used
     assign M_AXI_ARSIZE     = clogb2((C_M_AXI_DATA_WIDTH/8)-1);
@@ -457,7 +452,6 @@
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || start_single_burst_write == 1'b1)
             write_index <= 0;
-        //else if (wnext && (write_index != LEN-1))
         else if (wnext && (write_index != axi_awlen - 1))
             write_index <= write_index + 1;
         else
@@ -471,6 +465,8 @@
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1)
             axi_wdata = 0;
         else if (mst_exec_state == INIT_WRITE)
+            axi_wdata = buffer[write_index];
+        else if (mst_exec_state == WRITING)
             axi_wdata = buffer[write_index];
         else
             axi_wdata = axi_wdata;
@@ -566,7 +562,6 @@
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || start_single_burst_read)
             read_index <= 0;
-        //else if (rnext && (read_index != LEN-1))
         else if (rnext && (read_index != axi_awlen - 1))
             read_index <= read_index + 1;
         else
@@ -828,7 +823,6 @@
             writes_done <= 1'b0;
         // The writes_done should be associated with a bready response
         // else if (M_AXI_BVALID && axi_bready && (write_burst_counter == {(C_NO_BURSTS_REQ-1){1}}) && axi_wlast)
-        //else if (M_AXI_BVALID && (write_index == LEN-1) && axi_bready)
         else if (M_AXI_BVALID && (write_index == axi_awlen - 1) && axi_bready)
             writes_done <= 1'b1;
         else
@@ -863,7 +857,6 @@
             reads_done <= 1'b0;
         //The reads_done should be associated with a rready response
         //else if (M_AXI_BVALID && axi_bready && (write_burst_counter == {(C_NO_BURSTS_REQ-1){1}}) && axi_wlast)
-        //else if (M_AXI_RVALID && axi_rready && (read_index == LEN-1))
         else if (M_AXI_RVALID && axi_rready && (read_index == axi_awlen - 1))
             reads_done <= 1'b1;
         else
