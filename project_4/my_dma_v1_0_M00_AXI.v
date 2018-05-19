@@ -260,7 +260,7 @@
 
     // I/O Connections assignments
     //I/O Connections. Write Address (AW)
-    assign M_AXI_AWID       = 'b0;
+    assign M_AXI_AWID       = 1'b0;
     //The AXI address is a concatenation of the target base address + active offset range
     assign M_AXI_AWADDR     = /* C_M_TARGET_SLAVE_BASE_ADDR + */ axi_awaddr;
     //Burst LENgth is number of transaction beats, minus 1
@@ -276,19 +276,19 @@
     assign M_AXI_AWCACHE    = 4'b0010;
     assign M_AXI_AWPROT     = 3'h0;
     assign M_AXI_AWQOS      = 4'h0;
-    assign M_AXI_AWUSER     = 'b1;
+    assign M_AXI_AWUSER     = 1'b1;
     assign M_AXI_AWVALID    = axi_awvalid;
     //Write Data(W)
     assign M_AXI_WDATA	= axi_wdata;
     //All bursts are complete and aligned in this example
     assign M_AXI_WSTRB      = {(C_M_AXI_DATA_WIDTH/8){1'b1}};
     assign M_AXI_WLAST      = axi_wlast;
-    assign M_AXI_WUSER      = 'b0;
+    assign M_AXI_WUSER      = 4'b0;
     assign M_AXI_WVALID     = axi_wvalid;
     //Write Response (B)
     assign M_AXI_BREADY     = axi_bready;
     //Read Address (AR)
-    assign M_AXI_ARID       = 'b0;
+    assign M_AXI_ARID       = 1'b0;
     assign M_AXI_ARADDR	= /* C_M_TARGET_SLAVE_BASE_ADDR + */ axi_araddr;
     //Burst LENgth is number of transaction beats, minus 1
     assign M_AXI_ARLEN    = axi_awlen - 1;
@@ -303,7 +303,7 @@
     assign M_AXI_ARCACHE    = 4'b0010;
     assign M_AXI_ARPROT     = 3'h0;
     assign M_AXI_ARQOS      = 4'h0;
-    assign M_AXI_ARUSER     = 'b1;
+    assign M_AXI_ARUSER     = 1'b1;
     assign M_AXI_ARVALID    = axi_arvalid;
     //Read and Read Response (R)
     assign M_AXI_RREADY     = axi_rready;
