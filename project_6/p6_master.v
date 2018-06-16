@@ -32,7 +32,8 @@
     (
         // Users to add ports here
         (* mark_debug = "true" *)input wire hw_active,
-        input wire [C_M_AXI_DATA_WIDTH - 1 : 0] src_addr,
+        input wire [C_M_AXI_DATA_WIDTH - 1 : 0] face_src_addr,
+        input wire [C_M_AXI_DATA_WIDTH - 1 : 0] group_src_addr,
         output reg hw_done,
         output wire [C_M_AXI_DATA_WIDTH - 1 : 0] element1,
         output wire [C_M_AXI_DATA_WIDTH - 1 : 0] element2,
@@ -184,6 +185,8 @@
     localparam integer TRANSFER_BUFFER_WIDTH = 32;
     localparam integer TRANSFER_BUFFER_HEIGHT = 16;
     localparam integer TRANSFER_BURST_LENGTH = 8;
+    localparam integer MAX_Y_POS = GROUP_HEIGHT - FACE_BUFFER_HEIGHT - 1;
+    localparam integer MAX_X_POS = GROUP_WIDTH - FACE_BUFFER_WIDTH - 1;
     // C_TRANSACTIONS_NUM is the width of the index counter for
     // number of write or read transaction.
     localparam integer C_TRANSACTIONS_NUM = clogb2(TRANSFER_BURST_LENGTH-1);
@@ -191,15 +194,14 @@
     // Example State machine to initialize counter, initialize write transactions,
     // initialize read transactions and comparison of read data with the
     // written data words.
-    parameter [1:0]
-        IDLE = 2'b00, // This state initiates AXI4 transaction
+    localparam IDLE = 2'b00; // This state initiates AXI4 transaction
                     // after the state machine changes state to INIT_READ
                     // when there is 0 to 1 transition on INIT_AXI_TXN
-        INIT_READ  = 2'b01, // This state initializes read transaction
+    localparam INIT_READ  = 2'b01; // This state initializes read transaction
                             // once reads are done, the state machine
                             // changes state to INIT_WRITE
-        RESET    = 2'b10,
-        COMPLETE  = 2'b11; // This state issues the status of comparison
+    localparam RESET    = 2'b10;
+    localparam COMPLETE  = 2'b11; // This state issues the status of comparison
                             // of the written data with the read data
 
     // Global finite state machine states definitions
@@ -208,7 +210,8 @@
     localparam gREAD_DOWN_FACE = 4'd2;
     localparam gREAD_UP_GROUP = 4'd3;
     localparam gREAD_DOWN_GROUP = 4'd4;
-    localparam gCOMPUTE = 4'd5;
+    localparam gREAD_EXTRA_SIXTEEN_ROWS = 4'd5;
+    localparam gCOMPUTE = 4'd6;
 
     // Computation finite state machine states definitions
     localparam cINITIAL = 4'd0;
@@ -226,8 +229,9 @@
     localparam tRESET = 2'd2;
     localparam tCOMPLETE = 2'd3;
 
-    reg [4 - 1:0] gState;
-    reg [4 - 1:0] cState;
+    (* mark_debug = "true" *)reg [4 - 1:0] gState;
+    (* mark_debug = "true" *)reg [4 - 1:0] cState;
+    (* mark_debug = "true" *)reg fetchSixteenRowsFlag;
     (* mark_debug = "true" *)reg [1:0] mst_exec_state;
     // AXI4LITE signals
     //AXI4 internal temp signals
@@ -237,7 +241,7 @@
     reg      axi_wlast;
     reg      axi_wvalid;
     reg      axi_bready;
-    reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
+    (* mark_debug = "true" *)reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
     reg      axi_arvalid;
     reg      axi_rready;
     //write beat count in a burst
@@ -266,24 +270,21 @@
     reg [PIXEL_WIDTH - 1 : 0] groupBuffer[0 : GROUP_BUFFER_HEIGHT - 1][0 : GROUP_BUFFER_WIDTH - 1];
     reg [PIXEL_WIDTH - 1 : 0] newRowsBuffer[0 : NEW_ROWS_BUFFER_HEIGHT - 1][0 : NEW_ROWS_BUFFER_WIDTH - 1];
     reg [PIXEL_WIDTH - 1 : 0] transferBuffer[0 : TRANSFER_BUFFER_HEIGHT - 1][0 : TRANSFER_BUFFER_WIDTH - 1];
-    wire [PIXEL_WIDTH : 0] Difference[0 : FACE_BUFFER_HEIGHT - 1][0 : FACE_BUFFER_WIDTH - 1];
-    reg [PIXEL_WIDTH - 1 : 0] absoluteDifference_0[0 : FACE_BUFFER_HEIGHT * FACE_BUFFER_WIDTH / 4 - 1];
-    reg [PIXEL_WIDTH - 1 : 0] absoluteDifference_1[0 : FACE_BUFFER_HEIGHT * FACE_BUFFER_WIDTH / 4 - 1];
-    reg [PIXEL_WIDTH - 1 : 0] absoluteDifference_2[0 : FACE_BUFFER_HEIGHT * FACE_BUFFER_WIDTH / 4 - 1];
-    reg [PIXEL_WIDTH - 1 : 0] absoluteDifference_3[0 : FACE_BUFFER_HEIGHT * FACE_BUFFER_WIDTH / 4 - 1];
-    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_0[0 : 64 - 1];
-    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_1[0 : 16 - 1];
-    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_2[0 : 4 - 1];
-    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_3;
-    reg [12 - 1 : 0] yIndexNow; //Range from 0 to 1079
-    reg [12 - 1 : 0] xIndexNow; //Range from 0 to 1919
+    wire [PIXEL_WIDTH - 1: 0] absoluteDifference[0 : FACE_BUFFER_HEIGHT - 1][0 : FACE_BUFFER_WIDTH - 1];
+    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_0[0 : 256 - 1];
+    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_1[0 : 64 - 1];
+    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_2[0 : 16 - 1];
+    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_3[0 : 4 - 1];
+    reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_4;
+    reg [12 - 1 : 0] yIndexNow; //Range from 0 to 1047, represent the the upper left y-coordinate of the rectangle computating.
+    reg [12 - 1 : 0] xIndexNow; //Range from 0 to 1887, represent the the upper left x-coordinate of the rectanble computating.
     reg [32 - 1 : 0] miniSAD;
     reg [8 - 1 : 0] i_index;
     reg [8 - 1 : 0] j_index;
     (* mark_debug = "true" *)reg [5 - 1 : 0] remainRows;
     reg cleanSignal;
-    wire [32 - 1 : 0] faceShiftFlag;
-    wire [32 - 1 : 0] groupShiftFlag;
+    reg [12 - 1 : 0] numberOfRowsNotTransfered;
+    (* mark_debug = "true" *)wire [32 - 1 : 0] sum;
     // I/O Connections assignments
 
     //I/O Connections. Write Address (AW)
@@ -339,12 +340,12 @@
     assign burst_size_bytes    = TRANSFER_BURST_LENGTH * C_M_AXI_DATA_WIDTH/8;
     assign init_txn_pulse    = (!init_txn_ff2) && init_txn_ff;
 
-    assign element1 = transferBuffer[0][15];
-    assign element2 = transferBuffer[0][16];
-    assign element3 = transferBuffer[0][17];
-    assign element4 = transferBuffer[13][31];
-    assign element5 = transferBuffer[14][31];
-    assign element6 = transferBuffer[15][31];
+    assign element1 = faceBuffer[0][0];
+    assign element2 = faceBuffer[15][31];
+    assign element3 = faceBuffer[16][31];
+    assign element4 = faceBuffer[31][31];
+    assign element5 = groupBuffer[0][0];
+    assign element6 = groupBuffer[15][31];
 
 
     //Generate a one-clock pulse to initiate the AXI4 copy transaction.
@@ -593,9 +594,26 @@
     always @(posedge M_AXI_ACLK)
     begin
         if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)
-            axi_araddr <= src_addr;
+            axi_araddr <= face_src_addr;
         else if (M_AXI_ARREADY && axi_arvalid)
-            axi_araddr <= axi_araddr + 32;
+            //axi_araddr <= axi_araddr + 32;
+            case (gState)
+                gREAD_UP_FACE: begin
+                    axi_araddr <= axi_araddr + 32;
+                end
+                gREAD_DOWN_FACE: begin
+                    axi_araddr <= (remainRows == 5'd0) ? group_src_addr : axi_araddr + 32;
+                end
+                gREAD_UP_GROUP, gREAD_DOWN_GROUP, gREAD_EXTRA_SIXTEEN_ROWS: begin
+                    axi_araddr <= axi_araddr + GROUP_WIDTH;
+                end
+                gCOMPUTE: begin
+                    axi_araddr <= group_src_addr + 1;
+                end
+                default: begin
+                    axi_araddr <= face_src_addr;
+                end
+            endcase
         else
             axi_araddr <= axi_araddr;
     end
@@ -730,16 +748,28 @@
     //implement master command interface state machine
     always @ ( posedge M_AXI_ACLK ) begin
         if(mst_exec_state == IDLE)
-            remainRows <= 5'd16;
-        else if(mst_exec_state == INIT_READ)
+            remainRows <= (numberOfRowsNotTransfered < 12'd16) ? numberOfRowsNotTransfered - 1 : TRANSFER_BUFFER_HEIGHT - 1;
+        else if(mst_exec_state == COMPLETE)
             begin
                 if(reads_done)
-                    remainRows <= remainRows - 5'd1;
+                    remainRows <= (remainRows > 5'd0) ? remainRows - 5'd1 : 5'd0;
                 else
                     remainRows <= remainRows;
             end
         else
             remainRows <= remainRows;
+    end
+
+    always @ ( posedge M_AXI_ACLK ) begin
+        if (M_AXI_ARESETN == 1'b0)
+            fetchSixteenRowsFlag <= 1'b0;
+        else if(fetchSixteenRowsFlag == 1'b0)
+            if(gState >= 4'd2 && gState <= 4'd5 && mst_exec_state == IDLE)
+                fetchSixteenRowsFlag <= 1'b1;
+            else
+                fetchSixteenRowsFlag <= 1'b0;
+        else
+            fetchSixteenRowsFlag <= 1'b0;
     end
 
     always @ ( posedge M_AXI_ACLK)
@@ -751,7 +781,7 @@
                 mst_exec_state <= IDLE;
                 start_single_burst_write <= 1'b0;
                 start_single_burst_read  <= 1'b0;
-                hw_done <= 0;
+                //hw_done <= 0;
             end
         else
             begin
@@ -759,15 +789,15 @@
             case (mst_exec_state)
                 IDLE:
                     // Wait until the signal INIT_AXI_TXN becomes active.
-                    if (init_txn_pulse == 1'b1)
+                    if (init_txn_pulse == 1'b1 || fetchSixteenRowsFlag == 1'b1)
                         begin
                             mst_exec_state  <= INIT_READ;
-                            hw_done <= 0;
+                            //hw_done <= 0;
                         end
                     else
                         begin
                             mst_exec_state  <= IDLE;
-                            hw_done <= 0;
+                            //hw_done <= 0;
                         end
                 INIT_READ:
                     // This state is responsible to issue start_single_read pulse to
@@ -776,12 +806,12 @@
                     // read controller
                     if (reads_done)
                         begin
-                            hw_done <= 1'b0;
+                            //hw_done <= 1'b0;
                             mst_exec_state <= RESET;
                         end
                     else
                         begin
-                            hw_done <= 1'b0;
+                            //hw_done <= 1'b0;
                             mst_exec_state  <= INIT_READ;
                             if (~axi_arvalid && ~burst_read_active && ~start_single_burst_read)
                                 start_single_burst_read <= 1'b1;
@@ -798,18 +828,18 @@
                     begin
                         if(remainRows == 5'd0)
                             begin
-                                hw_done <= 1'b1;
+                                //hw_done <= 1'b1;
                                 mst_exec_state <= IDLE;
                             end
                         else
                             begin
-                                hw_done <= 1'b0;
+                                //hw_done <= 1'b0;
                                 mst_exec_state <= INIT_READ;
                             end
                     end
                 default :
                     begin
-                        hw_done <= 1'b0;
+                        //hw_done <= 1'b0;
                         mst_exec_state  <= IDLE;
                     end
             endcase
@@ -863,6 +893,22 @@
 
     genvar genOuterIndex;
 
+    always @ (posedge M_AXI_ACLK) begin
+        if(M_AXI_ARESETN == 1'b0)
+            hw_done <= 1'b0;
+        else
+            hw_done <= (gState == gCOMPUTE) ? 1'b1 : 1'b0;
+    end
+
+    always @ ( posedge M_AXI_ACLK ) begin
+        if(M_AXI_ARESETN == 1'b0 || gState == gINITIAL)
+            numberOfRowsNotTransfered <= 12'd1080;
+        else if(remainRows == 5'd0 && mst_exec_state == COMPLETE && gState >= gREAD_UP_GROUP)
+            numberOfRowsNotTransfered <= numberOfRowsNotTransfered - 12'd16;
+        else
+            numberOfRowsNotTransfered <= numberOfRowsNotTransfered;
+    end
+
     always @ ( posedge M_AXI_ACLK ) begin
         if(M_AXI_ARESETN == 1'b0)
             gState <= gINITIAL;
@@ -876,42 +922,50 @@
                             gState <= gINITIAL;
                     end
                     gREAD_UP_FACE: begin //gREAD_UP_FACE
-                        if(reads_done)
+                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_DOWN_FACE;
                         else
                             gState <= gREAD_UP_FACE;
                     end
                     gREAD_DOWN_FACE: begin
-                        if(reads_done)
+                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_UP_GROUP;
                         else
                             gState <= gREAD_DOWN_FACE;
                     end
                     gREAD_UP_GROUP: begin
-                        if(reads_done)
+                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_DOWN_GROUP;
                         else
                             gState <= gREAD_UP_GROUP;
                     end
                     gREAD_DOWN_GROUP: begin
-                        if(reads_done)
-                            gState <= gCOMPUTE;
+                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                            gState <= gREAD_EXTRA_SIXTEEN_ROWS;
                         else
                             gState <= gREAD_DOWN_GROUP;
                     end
-                    gCOMPUTE: begin
-
+                    gREAD_EXTRA_SIXTEEN_ROWS: begin
+                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                            gState <= gCOMPUTE;
+                        else
+                            gState <= gREAD_EXTRA_SIXTEEN_ROWS;
                     end
-                    default: ;
+                    gCOMPUTE: begin
+                        gState <= gCOMPUTE;
+                    end
+                    default: begin
+                        gState <= gINITIAL;
+                    end
                 endcase
             end
     end
 
-    assign faceShiftFlag = gState * 2 + reads_done; //Safe
+    assign sum = gState * (mst_exec_state + remainRows == 5'd3);
 
     always @ ( posedge M_AXI_ACLK ) begin
-        case (faceShiftFlag)
-            32'd5: begin
+        case (sum)
+            32'd1: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         faceBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
@@ -983,7 +1037,7 @@
                         faceBuffer[outerLoopIndex][31] <= faceBuffer[outerLoopIndex][31];
                     end
             end
-            32'd7: begin
+            32'd2: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         faceBuffer[outerLoopIndex][0] <= faceBuffer[outerLoopIndex][0];
@@ -1031,8 +1085,7 @@
                         faceBuffer[outerLoopIndex][7] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][7];
                         faceBuffer[outerLoopIndex][8] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][8];
                         faceBuffer[outerLoopIndex][9] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][9];
-                        faceBuffer[outerLoopIndex][10] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][10]
-                        ;
+                        faceBuffer[outerLoopIndex][10] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][10];                        ;
                         faceBuffer[outerLoopIndex][11] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][11];
                         faceBuffer[outerLoopIndex][12] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][12];
                         faceBuffer[outerLoopIndex][13] <= transferBuffer[outerLoopIndex - TRANSFER_BUFFER_HEIGHT][13];
@@ -1096,11 +1149,9 @@
         endcase
     end
 
-    assign groupShiftFlag = gState * 2 + reads_done; //Safe
-
     always @ ( posedge M_AXI_ACLK ) begin
-        case(groupShiftFlag)
-            32'd9: begin
+        case(sum)
+            32'd3: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         groupBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
@@ -1172,7 +1223,7 @@
                         groupBuffer[outerLoopIndex][31] <= groupBuffer[outerLoopIndex][31];
                     end
             end
-            32'd11: begin
+            32'd4: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         groupBuffer[outerLoopIndex][0] <= groupBuffer[outerLoopIndex][0];
@@ -1284,6 +1335,84 @@
         endcase
     end
 
+    always @ (posedge M_AXI_ACLK) begin
+        case(sum)
+            32'd5: begin
+                for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        newRowsBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
+                        newRowsBuffer[outerLoopIndex][1] <= transferBuffer[outerLoopIndex][1];
+                        newRowsBuffer[outerLoopIndex][2] <= transferBuffer[outerLoopIndex][2];
+                        newRowsBuffer[outerLoopIndex][3] <= transferBuffer[outerLoopIndex][3];
+                        newRowsBuffer[outerLoopIndex][4] <= transferBuffer[outerLoopIndex][4];
+                        newRowsBuffer[outerLoopIndex][5] <= transferBuffer[outerLoopIndex][5];
+                        newRowsBuffer[outerLoopIndex][6] <= transferBuffer[outerLoopIndex][6];
+                        newRowsBuffer[outerLoopIndex][7] <= transferBuffer[outerLoopIndex][7];
+                        newRowsBuffer[outerLoopIndex][8] <= transferBuffer[outerLoopIndex][8];
+                        newRowsBuffer[outerLoopIndex][9] <= transferBuffer[outerLoopIndex][9];
+                        newRowsBuffer[outerLoopIndex][10] <= transferBuffer[outerLoopIndex][10];
+                        newRowsBuffer[outerLoopIndex][11] <= transferBuffer[outerLoopIndex][11];
+                        newRowsBuffer[outerLoopIndex][12] <= transferBuffer[outerLoopIndex][12];
+                        newRowsBuffer[outerLoopIndex][13] <= transferBuffer[outerLoopIndex][13];
+                        newRowsBuffer[outerLoopIndex][14] <= transferBuffer[outerLoopIndex][14];
+                        newRowsBuffer[outerLoopIndex][15] <= transferBuffer[outerLoopIndex][15];
+                        newRowsBuffer[outerLoopIndex][16] <= transferBuffer[outerLoopIndex][16];
+                        newRowsBuffer[outerLoopIndex][17] <= transferBuffer[outerLoopIndex][17];
+                        newRowsBuffer[outerLoopIndex][18] <= transferBuffer[outerLoopIndex][18];
+                        newRowsBuffer[outerLoopIndex][19] <= transferBuffer[outerLoopIndex][19];
+                        newRowsBuffer[outerLoopIndex][20] <= transferBuffer[outerLoopIndex][20];
+                        newRowsBuffer[outerLoopIndex][21] <= transferBuffer[outerLoopIndex][21];
+                        newRowsBuffer[outerLoopIndex][22] <= transferBuffer[outerLoopIndex][22];
+                        newRowsBuffer[outerLoopIndex][23] <= transferBuffer[outerLoopIndex][23];
+                        newRowsBuffer[outerLoopIndex][24] <= transferBuffer[outerLoopIndex][24];
+                        newRowsBuffer[outerLoopIndex][25] <= transferBuffer[outerLoopIndex][25];
+                        newRowsBuffer[outerLoopIndex][26] <= transferBuffer[outerLoopIndex][26];
+                        newRowsBuffer[outerLoopIndex][27] <= transferBuffer[outerLoopIndex][27];
+                        newRowsBuffer[outerLoopIndex][28] <= transferBuffer[outerLoopIndex][28];
+                        newRowsBuffer[outerLoopIndex][29] <= transferBuffer[outerLoopIndex][29];
+                        newRowsBuffer[outerLoopIndex][30] <= transferBuffer[outerLoopIndex][30];
+                        newRowsBuffer[outerLoopIndex][31] <= transferBuffer[outerLoopIndex][31];
+                    end
+            end
+            default: begin
+                for(outerLoopIndex = 0; outerLoopIndex < NEW_ROWS_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+                    begin
+                        newRowsBuffer[outerLoopIndex][0] <= newRowsBuffer[outerLoopIndex][0];
+                        newRowsBuffer[outerLoopIndex][1] <= newRowsBuffer[outerLoopIndex][1];
+                        newRowsBuffer[outerLoopIndex][2] <= newRowsBuffer[outerLoopIndex][2];
+                        newRowsBuffer[outerLoopIndex][3] <= newRowsBuffer[outerLoopIndex][3];
+                        newRowsBuffer[outerLoopIndex][4] <= newRowsBuffer[outerLoopIndex][4];
+                        newRowsBuffer[outerLoopIndex][5] <= newRowsBuffer[outerLoopIndex][5];
+                        newRowsBuffer[outerLoopIndex][6] <= newRowsBuffer[outerLoopIndex][6];
+                        newRowsBuffer[outerLoopIndex][7] <= newRowsBuffer[outerLoopIndex][7];
+                        newRowsBuffer[outerLoopIndex][8] <= newRowsBuffer[outerLoopIndex][8];
+                        newRowsBuffer[outerLoopIndex][9] <= newRowsBuffer[outerLoopIndex][9];
+                        newRowsBuffer[outerLoopIndex][10] <= newRowsBuffer[outerLoopIndex][10];
+                        newRowsBuffer[outerLoopIndex][11] <= newRowsBuffer[outerLoopIndex][11];
+                        newRowsBuffer[outerLoopIndex][12] <= newRowsBuffer[outerLoopIndex][12];
+                        newRowsBuffer[outerLoopIndex][13] <= newRowsBuffer[outerLoopIndex][13];
+                        newRowsBuffer[outerLoopIndex][14] <= newRowsBuffer[outerLoopIndex][14];
+                        newRowsBuffer[outerLoopIndex][15] <= newRowsBuffer[outerLoopIndex][15];
+                        newRowsBuffer[outerLoopIndex][16] <= newRowsBuffer[outerLoopIndex][16];
+                        newRowsBuffer[outerLoopIndex][17] <= newRowsBuffer[outerLoopIndex][17];
+                        newRowsBuffer[outerLoopIndex][18] <= newRowsBuffer[outerLoopIndex][18];
+                        newRowsBuffer[outerLoopIndex][19] <= newRowsBuffer[outerLoopIndex][19];
+                        newRowsBuffer[outerLoopIndex][20] <= newRowsBuffer[outerLoopIndex][20];
+                        newRowsBuffer[outerLoopIndex][21] <= newRowsBuffer[outerLoopIndex][21];
+                        newRowsBuffer[outerLoopIndex][22] <= newRowsBuffer[outerLoopIndex][22];
+                        newRowsBuffer[outerLoopIndex][23] <= newRowsBuffer[outerLoopIndex][23];
+                        newRowsBuffer[outerLoopIndex][24] <= newRowsBuffer[outerLoopIndex][24];
+                        newRowsBuffer[outerLoopIndex][25] <= newRowsBuffer[outerLoopIndex][25];
+                        newRowsBuffer[outerLoopIndex][26] <= newRowsBuffer[outerLoopIndex][26];
+                        newRowsBuffer[outerLoopIndex][27] <= newRowsBuffer[outerLoopIndex][27];
+                        newRowsBuffer[outerLoopIndex][28] <= newRowsBuffer[outerLoopIndex][28];
+                        newRowsBuffer[outerLoopIndex][29] <= newRowsBuffer[outerLoopIndex][29];
+                        newRowsBuffer[outerLoopIndex][30] <= newRowsBuffer[outerLoopIndex][30];
+                        newRowsBuffer[outerLoopIndex][31] <= newRowsBuffer[outerLoopIndex][31];
+                    end
+            end
+        endcase
+    end
     // Computation finite machine
     /*always @ (posedge M_AXI_ACLK) begin
         if(M_AXI_ARESETN)
@@ -1301,85 +1430,170 @@
     generate
         for(genOuterIndex = 0; genOuterIndex < FACE_BUFFER_HEIGHT; genOuterIndex = genOuterIndex + 1)
             begin:diff
-                assign Difference[genOuterIndex][0] = {1'b0, faceBuffer[genOuterIndex][0]} - {1'b0, groupBuffer[genOuterIndex][0]};
-                assign Difference[genOuterIndex][1] = {1'b0, faceBuffer[genOuterIndex][1]} - {1'b0, groupBuffer[genOuterIndex][1]};
-                assign Difference[genOuterIndex][2] = {1'b0, faceBuffer[genOuterIndex][2]} - {1'b0, groupBuffer[genOuterIndex][2]};
-                assign Difference[genOuterIndex][3] = {1'b0, faceBuffer[genOuterIndex][3]} - {1'b0, groupBuffer[genOuterIndex][3]};
-                assign Difference[genOuterIndex][4] = {1'b0, faceBuffer[genOuterIndex][4]} - {1'b0, groupBuffer[genOuterIndex][4]};
-                assign Difference[genOuterIndex][5] = {1'b0, faceBuffer[genOuterIndex][5]} - {1'b0, groupBuffer[genOuterIndex][5]};
-                assign Difference[genOuterIndex][6] = {1'b0, faceBuffer[genOuterIndex][6]} - {1'b0, groupBuffer[genOuterIndex][6]};
-                assign Difference[genOuterIndex][7] = {1'b0, faceBuffer[genOuterIndex][7]} - {1'b0, groupBuffer[genOuterIndex][7]};
-                assign Difference[genOuterIndex][8] = {1'b0, faceBuffer[genOuterIndex][8]} - {1'b0, groupBuffer[genOuterIndex][8]};
-                assign Difference[genOuterIndex][9] = {1'b0, faceBuffer[genOuterIndex][9]} - {1'b0, groupBuffer[genOuterIndex][9]};
-                assign Difference[genOuterIndex][10] = {1'b0, faceBuffer[genOuterIndex][10]} - {1'b0, groupBuffer[genOuterIndex][10]};
-                assign Difference[genOuterIndex][11] = {1'b0, faceBuffer[genOuterIndex][11]} - {1'b0, groupBuffer[genOuterIndex][11]};
-                assign Difference[genOuterIndex][12] = {1'b0, faceBuffer[genOuterIndex][12]} - {1'b0, groupBuffer[genOuterIndex][12]};
-                assign Difference[genOuterIndex][13] = {1'b0, faceBuffer[genOuterIndex][13]} - {1'b0, groupBuffer[genOuterIndex][13]};
-                assign Difference[genOuterIndex][14] = {1'b0, faceBuffer[genOuterIndex][14]} - {1'b0, groupBuffer[genOuterIndex][14]};
-                assign Difference[genOuterIndex][15] = {1'b0, faceBuffer[genOuterIndex][15]} - {1'b0, groupBuffer[genOuterIndex][15]};
-                assign Difference[genOuterIndex][16] = {1'b0, faceBuffer[genOuterIndex][16]} - {1'b0, groupBuffer[genOuterIndex][16]};
-                assign Difference[genOuterIndex][17] = {1'b0, faceBuffer[genOuterIndex][17]} - {1'b0, groupBuffer[genOuterIndex][17]};
-                assign Difference[genOuterIndex][18] = {1'b0, faceBuffer[genOuterIndex][18]} - {1'b0, groupBuffer[genOuterIndex][18]};
-                assign Difference[genOuterIndex][19] = {1'b0, faceBuffer[genOuterIndex][19]} - {1'b0, groupBuffer[genOuterIndex][19]};
-                assign Difference[genOuterIndex][20] = {1'b0, faceBuffer[genOuterIndex][20]} - {1'b0, groupBuffer[genOuterIndex][20]};
-                assign Difference[genOuterIndex][21] = {1'b0, faceBuffer[genOuterIndex][21]} - {1'b0, groupBuffer[genOuterIndex][21]};
-                assign Difference[genOuterIndex][22] = {1'b0, faceBuffer[genOuterIndex][22]} - {1'b0, groupBuffer[genOuterIndex][22]};
-                assign Difference[genOuterIndex][23] = {1'b0, faceBuffer[genOuterIndex][23]} - {1'b0, groupBuffer[genOuterIndex][23]};
-                assign Difference[genOuterIndex][24] = {1'b0, faceBuffer[genOuterIndex][24]} - {1'b0, groupBuffer[genOuterIndex][24]};
-                assign Difference[genOuterIndex][25] = {1'b0, faceBuffer[genOuterIndex][25]} - {1'b0, groupBuffer[genOuterIndex][25]};
-                assign Difference[genOuterIndex][26] = {1'b0, faceBuffer[genOuterIndex][26]} - {1'b0, groupBuffer[genOuterIndex][26]};
-                assign Difference[genOuterIndex][27] = {1'b0, faceBuffer[genOuterIndex][27]} - {1'b0, groupBuffer[genOuterIndex][27]};
-                assign Difference[genOuterIndex][28] = {1'b0, faceBuffer[genOuterIndex][28]} - {1'b0, groupBuffer[genOuterIndex][28]};
-                assign Difference[genOuterIndex][29] = {1'b0, faceBuffer[genOuterIndex][29]} - {1'b0, groupBuffer[genOuterIndex][29]};
-                assign Difference[genOuterIndex][30] = {1'b0, faceBuffer[genOuterIndex][30]} - {1'b0, groupBuffer[genOuterIndex][30]};
-                assign Difference[genOuterIndex][31] = {1'b0, faceBuffer[genOuterIndex][31]} - {1'b0, groupBuffer[genOuterIndex][31]};
+                assign absoluteDifference[genOuterIndex][0] = (faceBuffer[genOuterIndex][0] > groupBuffer[genOuterIndex][0])
+                ? faceBuffer[genOuterIndex][0] - groupBuffer[genOuterIndex][0]
+                : groupBuffer[genOuterIndex][0] - faceBuffer[genOuterIndex][0];
+                assign absoluteDifference[genOuterIndex][1] = (faceBuffer[genOuterIndex][1] > groupBuffer[genOuterIndex][1])
+                ? faceBuffer[genOuterIndex][1] - groupBuffer[genOuterIndex][1]
+                : groupBuffer[genOuterIndex][1] - faceBuffer[genOuterIndex][1];
+                assign absoluteDifference[genOuterIndex][2] = (faceBuffer[genOuterIndex][2] > groupBuffer[genOuterIndex][2])
+                ? faceBuffer[genOuterIndex][2] - groupBuffer[genOuterIndex][2]
+                : groupBuffer[genOuterIndex][2] - faceBuffer[genOuterIndex][2];
+                assign absoluteDifference[genOuterIndex][3] = (faceBuffer[genOuterIndex][3] > groupBuffer[genOuterIndex][3])
+                ? faceBuffer[genOuterIndex][3] - groupBuffer[genOuterIndex][3]
+                : groupBuffer[genOuterIndex][3] - faceBuffer[genOuterIndex][3];
+                assign absoluteDifference[genOuterIndex][4] = (faceBuffer[genOuterIndex][4] > groupBuffer[genOuterIndex][4])
+                ? faceBuffer[genOuterIndex][4] - groupBuffer[genOuterIndex][4]
+                : groupBuffer[genOuterIndex][4] - faceBuffer[genOuterIndex][4];
+                assign absoluteDifference[genOuterIndex][5] = (faceBuffer[genOuterIndex][5] > groupBuffer[genOuterIndex][5])
+                ? faceBuffer[genOuterIndex][5] - groupBuffer[genOuterIndex][5]
+                : groupBuffer[genOuterIndex][5] - faceBuffer[genOuterIndex][5];
+                assign absoluteDifference[genOuterIndex][6] = (faceBuffer[genOuterIndex][6] > groupBuffer[genOuterIndex][6])
+                ? faceBuffer[genOuterIndex][6] - groupBuffer[genOuterIndex][6]
+                : groupBuffer[genOuterIndex][6] - faceBuffer[genOuterIndex][6];
+                assign absoluteDifference[genOuterIndex][7] = (faceBuffer[genOuterIndex][7] > groupBuffer[genOuterIndex][7])
+                ? faceBuffer[genOuterIndex][7] - groupBuffer[genOuterIndex][7]
+                : groupBuffer[genOuterIndex][7] - faceBuffer[genOuterIndex][7];
+                assign absoluteDifference[genOuterIndex][8] = (faceBuffer[genOuterIndex][8] > groupBuffer[genOuterIndex][8])
+                ? faceBuffer[genOuterIndex][8] - groupBuffer[genOuterIndex][8]
+                : groupBuffer[genOuterIndex][8] - faceBuffer[genOuterIndex][8];
+                assign absoluteDifference[genOuterIndex][9] = (faceBuffer[genOuterIndex][9] > groupBuffer[genOuterIndex][9])
+                ? faceBuffer[genOuterIndex][9] - groupBuffer[genOuterIndex][9]
+                : groupBuffer[genOuterIndex][9] - faceBuffer[genOuterIndex][9];
+                assign absoluteDifference[genOuterIndex][10] = (faceBuffer[genOuterIndex][10] > groupBuffer[genOuterIndex][10])
+                ? faceBuffer[genOuterIndex][10] - groupBuffer[genOuterIndex][10]
+                : groupBuffer[genOuterIndex][10] - faceBuffer[genOuterIndex][10];
+                assign absoluteDifference[genOuterIndex][11] = (faceBuffer[genOuterIndex][11] > groupBuffer[genOuterIndex][11])
+                ? faceBuffer[genOuterIndex][11] - groupBuffer[genOuterIndex][11]
+                : groupBuffer[genOuterIndex][11] - faceBuffer[genOuterIndex][11];
+                assign absoluteDifference[genOuterIndex][12] = (faceBuffer[genOuterIndex][12] > groupBuffer[genOuterIndex][12])
+                ? faceBuffer[genOuterIndex][12] - groupBuffer[genOuterIndex][12]
+                : groupBuffer[genOuterIndex][12] - faceBuffer[genOuterIndex][12];
+                assign absoluteDifference[genOuterIndex][13] = (faceBuffer[genOuterIndex][13] > groupBuffer[genOuterIndex][13])
+                ? faceBuffer[genOuterIndex][13] - groupBuffer[genOuterIndex][13]
+                : groupBuffer[genOuterIndex][13] - faceBuffer[genOuterIndex][13];
+                assign absoluteDifference[genOuterIndex][14] = (faceBuffer[genOuterIndex][14] > groupBuffer[genOuterIndex][14])
+                ? faceBuffer[genOuterIndex][14] - groupBuffer[genOuterIndex][14]
+                : groupBuffer[genOuterIndex][14] - faceBuffer[genOuterIndex][14];
+                assign absoluteDifference[genOuterIndex][15] = (faceBuffer[genOuterIndex][15] > groupBuffer[genOuterIndex][15])
+                ? faceBuffer[genOuterIndex][15] - groupBuffer[genOuterIndex][15]
+                : groupBuffer[genOuterIndex][15] - faceBuffer[genOuterIndex][15];
+                assign absoluteDifference[genOuterIndex][16] = (faceBuffer[genOuterIndex][16] > groupBuffer[genOuterIndex][16])
+                ? faceBuffer[genOuterIndex][16] - groupBuffer[genOuterIndex][16]
+                : groupBuffer[genOuterIndex][16] - faceBuffer[genOuterIndex][16];
+                assign absoluteDifference[genOuterIndex][17] = (faceBuffer[genOuterIndex][17] > groupBuffer[genOuterIndex][17])
+                ? faceBuffer[genOuterIndex][17] - groupBuffer[genOuterIndex][17]
+                : groupBuffer[genOuterIndex][17] - faceBuffer[genOuterIndex][17];
+                assign absoluteDifference[genOuterIndex][18] = (faceBuffer[genOuterIndex][18] > groupBuffer[genOuterIndex][18])
+                ? faceBuffer[genOuterIndex][18] - groupBuffer[genOuterIndex][18]
+                : groupBuffer[genOuterIndex][18] - faceBuffer[genOuterIndex][18];
+                assign absoluteDifference[genOuterIndex][19] = (faceBuffer[genOuterIndex][19] > groupBuffer[genOuterIndex][19])
+                ? faceBuffer[genOuterIndex][19] - groupBuffer[genOuterIndex][19]
+                : groupBuffer[genOuterIndex][19] - faceBuffer[genOuterIndex][19];
+                assign absoluteDifference[genOuterIndex][20] = (faceBuffer[genOuterIndex][20] > groupBuffer[genOuterIndex][20])
+                ? faceBuffer[genOuterIndex][20] - groupBuffer[genOuterIndex][20]
+                : groupBuffer[genOuterIndex][20] - faceBuffer[genOuterIndex][20];
+                assign absoluteDifference[genOuterIndex][21] = (faceBuffer[genOuterIndex][21] > groupBuffer[genOuterIndex][21])
+                ? faceBuffer[genOuterIndex][21] - groupBuffer[genOuterIndex][21]
+                : groupBuffer[genOuterIndex][21] - faceBuffer[genOuterIndex][21];
+                assign absoluteDifference[genOuterIndex][22] = (faceBuffer[genOuterIndex][22] > groupBuffer[genOuterIndex][22])
+                ? faceBuffer[genOuterIndex][22] - groupBuffer[genOuterIndex][22]
+                : groupBuffer[genOuterIndex][22] - faceBuffer[genOuterIndex][22];
+                assign absoluteDifference[genOuterIndex][23] = (faceBuffer[genOuterIndex][23] > groupBuffer[genOuterIndex][23])
+                ? faceBuffer[genOuterIndex][23] - groupBuffer[genOuterIndex][23]
+                : groupBuffer[genOuterIndex][23] - faceBuffer[genOuterIndex][23];
+                assign absoluteDifference[genOuterIndex][24] = (faceBuffer[genOuterIndex][24] > groupBuffer[genOuterIndex][24])
+                ? faceBuffer[genOuterIndex][24] - groupBuffer[genOuterIndex][24]
+                : groupBuffer[genOuterIndex][24] - faceBuffer[genOuterIndex][24];
+                assign absoluteDifference[genOuterIndex][25] = (faceBuffer[genOuterIndex][25] > groupBuffer[genOuterIndex][25])
+                ? faceBuffer[genOuterIndex][25] - groupBuffer[genOuterIndex][25]
+                : groupBuffer[genOuterIndex][25] - faceBuffer[genOuterIndex][25];
+                assign absoluteDifference[genOuterIndex][26] = (faceBuffer[genOuterIndex][26] > groupBuffer[genOuterIndex][26])
+                ? faceBuffer[genOuterIndex][26] - groupBuffer[genOuterIndex][26]
+                : groupBuffer[genOuterIndex][26] - faceBuffer[genOuterIndex][26];
+                assign absoluteDifference[genOuterIndex][27] = (faceBuffer[genOuterIndex][27] > groupBuffer[genOuterIndex][27])
+                ? faceBuffer[genOuterIndex][27] - groupBuffer[genOuterIndex][27]
+                : groupBuffer[genOuterIndex][27] - faceBuffer[genOuterIndex][27];
+                assign absoluteDifference[genOuterIndex][28] = (faceBuffer[genOuterIndex][28] > groupBuffer[genOuterIndex][28])
+                ? faceBuffer[genOuterIndex][28] - groupBuffer[genOuterIndex][28]
+                : groupBuffer[genOuterIndex][28] - faceBuffer[genOuterIndex][28];
+                assign absoluteDifference[genOuterIndex][29] = (faceBuffer[genOuterIndex][29] > groupBuffer[genOuterIndex][29])
+                ? faceBuffer[genOuterIndex][29] - groupBuffer[genOuterIndex][29]
+                : groupBuffer[genOuterIndex][29] - faceBuffer[genOuterIndex][29];
+                assign absoluteDifference[genOuterIndex][30] = (faceBuffer[genOuterIndex][30] > groupBuffer[genOuterIndex][30])
+                ? faceBuffer[genOuterIndex][30] - groupBuffer[genOuterIndex][30]
+                : groupBuffer[genOuterIndex][30] - faceBuffer[genOuterIndex][30];
+                assign absoluteDifference[genOuterIndex][31] = (faceBuffer[genOuterIndex][31] > groupBuffer[genOuterIndex][31])
+                ? faceBuffer[genOuterIndex][31] - groupBuffer[genOuterIndex][31]
+                : groupBuffer[genOuterIndex][31] - faceBuffer[genOuterIndex][31];
             end
     endgenerate
 
-    always @ ( posedge M_AXI_ACLK ) begin
+    always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < FACE_BUFFER_HEIGHT / 4; outerLoopIndex = outerLoopIndex + 1)
             begin
-                for(innerLoopIndex = 0; innerLoopIndex < FACE_BUFFER_WIDTH; innerLoopIndex = innerLoopIndex  +1)
+                for(innerLoopIndex = 0; innerLoopIndex < FACE_BUFFER_WIDTH; innerLoopIndex = innerLoopIndex + 4)
                     begin
-                        absoluteDifference_0[outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex]
-                        <= (Difference[outerLoopIndex][innerLoopIndex][8] == 1'b1)
-                        ? 9'd0 - Difference[outerLoopIndex][innerLoopIndex]
-                        : Difference[outerLoopIndex][innerLoopIndex];
-
-                        absoluteDifference_1[outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex]
-                        <= (Difference[outerLoopIndex + 8][innerLoopIndex][8] == 1'b1)
-                        ? 9'd0 - Difference[outerLoopIndex + 8][innerLoopIndex]
-                        : Difference[outerLoopIndex + 8][innerLoopIndex];
-
-                        absoluteDifference_2[outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex]
-                        <= (Difference[outerLoopIndex + 16][innerLoopIndex][8] == 1'b1)
-                        ? 9'd0 - Difference[outerLoopIndex + 16][innerLoopIndex] :
-                        Difference[outerLoopIndex + 16][innerLoopIndex];
-
-                        absoluteDifference_3[outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex]
-                        <= (Difference[outerLoopIndex + 24][innerLoopIndex][8] == 1'b1)
-                        ? 9'd0 - Difference[outerLoopIndex + 24][innerLoopIndex]
-                        : Difference[outerLoopIndex + 24][innerLoopIndex];
+                        adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
+                        <=
+                        absoluteDifference[outerLoopIndex][innerLoopIndex]
+                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
+                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
+                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
                     end
+            end
+        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4; outerLoopIndex < FACE_BUFFER_HEIGHT / 4 * 2; outerLoopIndex = outerLoopIndex + 1)
+            begin
+                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
+                <=
+                absoluteDifference[outerLoopIndex][innerLoopIndex]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
+            end
+        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4 * 2; outerLoopIndex < FACE_BUFFER_HEIGHT / 4 * 3; outerLoopIndex = outerLoopIndex + 1)
+            begin
+                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
+                <=
+                absoluteDifference[outerLoopIndex][innerLoopIndex]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
+            end
+        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4 * 3; outerLoopIndex < FACE_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
+            begin
+                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
+                <=
+                absoluteDifference[outerLoopIndex][innerLoopIndex]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
+                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
+            end
+    end
+
+    always @ (posedge M_AXI_ACLK) begin
+        for(outerLoopIndex = 0; outerLoopIndex < 64; outerLoopIndex = outerLoopIndex + 1)
+            begin
+                adderResult_1[outerLoopIndex] <= adderResult_0[outerLoopIndex * 2] + adderResult_0[outerLoopIndex * 2 + 1];
             end
     end
 
     always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < 16; outerLoopIndex = outerLoopIndex + 1)
             begin
-                adderResult_1[outerLoopIndex] <= adderResult_0[outerLoopIndex * 4 + 0] + adderResult_0[outerLoopIndex * 4 + 1] + adderResult_0[outerLoopIndex * 4 + 2] + adderResult_0[outerLoopIndex * 4 + 3];
+                adderResult_2[outerLoopIndex] <= adderResult_1[outerLoopIndex * 2] + adderResult_1[outerLoopIndex * 2 + 1];
             end
     end
 
     always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < 4; outerLoopIndex = outerLoopIndex + 1)
             begin
-                adderResult_2[outerLoopIndex] <= adderResult_1[outerLoopIndex * 4 + 0] + adderResult_1[outerLoopIndex * 4 + 1] + adderResult_1[outerLoopIndex * 4 + 2] + adderResult_1[outerLoopIndex * 4 + 3];
+                adderResult_3[outerLoopIndex] <= adderResult_2[outerLoopIndex * 2] + adderResult_2[outerLoopIndex * 2 + 1];
             end
     end
 
     always @ (posedge M_AXI_ACLK) begin
-        adderResult_3 <= adderResult_2[0] + adderResult_2[1] + adderResult_2[2] + adderResult_3[3];
+        adderResult_4 <= adderResult_3[0] + adderResult_3[1] + adderResult_3[2] + adderResult_3[3];
     end
 
     always @ (posedge M_AXI_ACLK) begin
