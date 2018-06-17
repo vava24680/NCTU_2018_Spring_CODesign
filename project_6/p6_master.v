@@ -175,18 +175,20 @@
     integer innerLoopIndex;
     localparam integer GROUP_WIDTH = 1920;
     localparam integer GROUP_HEIGHT = 1080;
+    localparam integer FACE_WIDTH = 32;
+    localparam integer FACE_HEIGHT = 32;
     localparam integer GROUP_BUFFER_WIDTH = 32;
     localparam integer GROUP_BUFFER_HEIGHT = 32;
     localparam integer NEW_ROWS_BUFFER_WIDTH = 32;
     localparam integer NEW_ROWS_BUFFER_HEIGHT = 16;
-    localparam integer FACE_BUFFER_WIDTH = 32;
-    localparam integer FACE_BUFFER_HEIGHT = 32;
+    localparam integer FACE_BUFFER_WIDTH = FACE_WIDTH;
+    localparam integer FACE_BUFFER_HEIGHT = FACE_HEIGHT;
     localparam integer PIXEL_WIDTH = 8;
     localparam integer TRANSFER_BUFFER_WIDTH = 32;
     localparam integer TRANSFER_BUFFER_HEIGHT = 16;
     localparam integer TRANSFER_BURST_LENGTH = 8;
-    localparam integer MAX_Y_POS = GROUP_HEIGHT - FACE_BUFFER_HEIGHT - 1;
     localparam integer MAX_X_POS = GROUP_WIDTH - FACE_BUFFER_WIDTH - 1;
+    localparam integer MAX_Y_POS = GROUP_HEIGHT - FACE_BUFFER_HEIGHT - 1;
     // C_TRANSACTIONS_NUM is the width of the index counter for
     // number of write or read transaction.
     localparam integer C_TRANSACTIONS_NUM = clogb2(TRANSFER_BURST_LENGTH-1);
@@ -212,16 +214,17 @@
     localparam gREAD_DOWN_GROUP = 4'd4;
     localparam gREAD_EXTRA_SIXTEEN_ROWS = 4'd5;
     localparam gCOMPUTE = 4'd6;
+    localparam gCOMPLETE = 4'd7;
 
     // Computation finite state machine states definitions
     localparam cINITIAL = 4'd0;
-    localparam cROUND0 = 4'd1;
-    localparam cROUND1 = 4'd2;
-    localparam CROUND2 = 4'd3;
-    localparam CROUND3 = 4'd4;
+    localparam cFIRST_ROUND_COMPUTATION = 4'd1;
+    localparam cCOMPARE_SAD = 4'd2;
+    localparam cSIXTEEN_ROWS_DONE = 4'd3;
 
-    // New 16-rows transfer finite state machine states definitions
-    localparam nrtIDLE = 2'd0;
+    // Pipeline transfer 16 new rows finite state machine states definitions
+    localparam ptIDLE = 2'd0;
+    localparam ptTRANSFER = 2'd1;
 
     // Transfer finite state machine states definitions
     localparam tIDLE = 2'd0;
@@ -229,10 +232,6 @@
     localparam tRESET = 2'd2;
     localparam tCOMPLETE = 2'd3;
 
-    (* mark_debug = "true" *)reg [4 - 1:0] gState;
-    (* mark_debug = "true" *)reg [4 - 1:0] cState;
-    (* mark_debug = "true" *)reg fetchSixteenRowsFlag;
-    (* mark_debug = "true" *)reg [1:0] mst_exec_state;
     // AXI4LITE signals
     //AXI4 internal temp signals
     reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_awaddr;
@@ -241,7 +240,7 @@
     reg      axi_wlast;
     reg      axi_wvalid;
     reg      axi_bready;
-    (* mark_debug = "true" *)reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
+    reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
     reg      axi_arvalid;
     reg      axi_rready;
     //write beat count in a burst
@@ -266,6 +265,11 @@
     reg      init_txn_edge;
     wire      init_txn_pulse;
 
+    (* mark_debug = "true" *)reg [4 - 1:0] gState;
+    (* mark_debug = "true" *)reg [4 - 1:0] cState;
+    reg [2 - 1 : 0] pState;
+    (* mark_debug = "true" *)reg fetchSixteenRowsFlag;
+    (* mark_debug = "true" *)reg [1:0] mst_exec_state;
     reg [PIXEL_WIDTH - 1 : 0] faceBuffer[0 : FACE_BUFFER_HEIGHT - 1][0 : FACE_BUFFER_WIDTH - 1];
     reg [PIXEL_WIDTH - 1 : 0] groupBuffer[0 : GROUP_BUFFER_HEIGHT - 1][0 : GROUP_BUFFER_WIDTH - 1];
     reg [PIXEL_WIDTH - 1 : 0] newRowsBuffer[0 : NEW_ROWS_BUFFER_HEIGHT - 1][0 : NEW_ROWS_BUFFER_WIDTH - 1];
@@ -278,13 +282,21 @@
     reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_4;
     reg [12 - 1 : 0] yIndexNow; //Range from 0 to 1047, represent the the upper left y-coordinate of the rectangle computating.
     reg [12 - 1 : 0] xIndexNow; //Range from 0 to 1887, represent the the upper left x-coordinate of the rectanble computating.
+    reg [12 - 1 : 0] yIndexAns;
+    reg [12 - 1 : 0] xIndexAns;
     reg [32 - 1 : 0] miniSAD;
     reg [8 - 1 : 0] i_index;
     reg [8 - 1 : 0] j_index;
-    (* mark_debug = "true" *)reg [5 - 1 : 0] remainRows;
+    (* mark_debug = "true" *)reg [5 - 1 : 0] remainRowsSubsOne;
     reg cleanSignal;
-    reg [12 - 1 : 0] numberOfRowsNotTransfered;
-    (* mark_debug = "true" *)wire [32 - 1 : 0] sum;
+    reg shiftDatatSignal;
+    (* mark_debug = "true" *)reg startAdderSignal;
+    (* mark_debug = "true" *)reg startPipelineTransferSignal;
+    (* mark_debug = "true" *)reg pipelineTransferDoneSignal;
+    (* mark_debug = "true" *)reg reachBottomSignal;
+    (* mark_debug = "true" *)reg [5 - 1 : 0] cCounter;
+    (* mark_debug = "true" *)reg [12 - 1 : 0] numberOfRowsNotTransfered;
+    (* mark_debug = "true" *)wire [16 - 1 : 0] sum;
     // I/O Connections assignments
 
     //I/O Connections. Write Address (AW)
@@ -344,8 +356,8 @@
     assign element2 = faceBuffer[15][31];
     assign element3 = faceBuffer[16][31];
     assign element4 = faceBuffer[31][31];
-    assign element5 = groupBuffer[0][0];
-    assign element6 = groupBuffer[15][31];
+    assign element5 = xIndexAns;
+    assign element6 = yIndexAns;
 
 
     //Generate a one-clock pulse to initiate the AXI4 copy transaction.
@@ -602,7 +614,7 @@
                     axi_araddr <= axi_araddr + 32;
                 end
                 gREAD_DOWN_FACE: begin
-                    axi_araddr <= (remainRows == 5'd0) ? group_src_addr : axi_araddr + 32;
+                    axi_araddr <= (remainRowsSubsOne == 5'd0) ? group_src_addr : axi_araddr + 32;
                 end
                 gREAD_UP_GROUP, gREAD_DOWN_GROUP, gREAD_EXTRA_SIXTEEN_ROWS: begin
                     axi_araddr <= axi_araddr + GROUP_WIDTH;
@@ -748,23 +760,28 @@
     //implement master command interface state machine
     always @ ( posedge M_AXI_ACLK ) begin
         if(mst_exec_state == IDLE)
-            remainRows <= (numberOfRowsNotTransfered < 12'd16) ? numberOfRowsNotTransfered - 1 : TRANSFER_BUFFER_HEIGHT - 1;
+            remainRowsSubsOne <= (numberOfRowsNotTransfered < 12'd16) ? numberOfRowsNotTransfered - 1 : TRANSFER_BUFFER_HEIGHT - 1;
         else if(mst_exec_state == COMPLETE)
             begin
                 if(reads_done)
-                    remainRows <= (remainRows > 5'd0) ? remainRows - 5'd1 : 5'd0;
+                    remainRowsSubsOne <= (remainRowsSubsOne > 5'd0) ? remainRowsSubsOne - 5'd1 : 5'd1;
                 else
-                    remainRows <= remainRows;
+                    remainRowsSubsOne <= remainRowsSubsOne;
             end
         else
-            remainRows <= remainRows;
+            remainRowsSubsOne <= remainRowsSubsOne;
     end
 
     always @ ( posedge M_AXI_ACLK ) begin
         if (M_AXI_ARESETN == 1'b0)
             fetchSixteenRowsFlag <= 1'b0;
         else if(fetchSixteenRowsFlag == 1'b0)
-            if(gState >= 4'd2 && gState <= 4'd5 && mst_exec_state == IDLE)
+            if( (gState >= gREAD_DOWN_FACE && gState <= gREAD_EXTRA_SIXTEEN_ROWS && mst_exec_state == IDLE)
+                ||
+                reachBottomSignal
+                ||
+                startPipelineTransferSignal
+                )
                 fetchSixteenRowsFlag <= 1'b1;
             else
                 fetchSixteenRowsFlag <= 1'b0;
@@ -781,7 +798,6 @@
                 mst_exec_state <= IDLE;
                 start_single_burst_write <= 1'b0;
                 start_single_burst_read  <= 1'b0;
-                //hw_done <= 0;
             end
         else
             begin
@@ -792,12 +808,10 @@
                     if (init_txn_pulse == 1'b1 || fetchSixteenRowsFlag == 1'b1)
                         begin
                             mst_exec_state  <= INIT_READ;
-                            //hw_done <= 0;
                         end
                     else
                         begin
                             mst_exec_state  <= IDLE;
-                            //hw_done <= 0;
                         end
                 INIT_READ:
                     // This state is responsible to issue start_single_read pulse to
@@ -806,12 +820,10 @@
                     // read controller
                     if (reads_done)
                         begin
-                            //hw_done <= 1'b0;
                             mst_exec_state <= RESET;
                         end
                     else
                         begin
-                            //hw_done <= 1'b0;
                             mst_exec_state  <= INIT_READ;
                             if (~axi_arvalid && ~burst_read_active && ~start_single_burst_read)
                                 start_single_burst_read <= 1'b1;
@@ -826,20 +838,17 @@
                     // compare_done signal will be asseted to indicate success.
                     //if (~error_reg)
                     begin
-                        if(remainRows == 5'd0)
+                        if(remainRowsSubsOne == 5'd0)
                             begin
-                                //hw_done <= 1'b1;
                                 mst_exec_state <= IDLE;
                             end
                         else
                             begin
-                                //hw_done <= 1'b0;
                                 mst_exec_state <= INIT_READ;
                             end
                     end
                 default :
                     begin
-                        //hw_done <= 1'b0;
                         mst_exec_state  <= IDLE;
                     end
             endcase
@@ -893,18 +902,11 @@
 
     genvar genOuterIndex;
 
-    always @ (posedge M_AXI_ACLK) begin
-        if(M_AXI_ARESETN == 1'b0)
-            hw_done <= 1'b0;
-        else
-            hw_done <= (gState == gCOMPUTE) ? 1'b1 : 1'b0;
-    end
-
     always @ ( posedge M_AXI_ACLK ) begin
-        if(M_AXI_ARESETN == 1'b0 || gState == gINITIAL)
+        if(M_AXI_ARESETN == 1'b0 || gState == gINITIAL || reachBottomSignal)
             numberOfRowsNotTransfered <= 12'd1080;
-        else if(remainRows == 5'd0 && mst_exec_state == COMPLETE && gState >= gREAD_UP_GROUP)
-            numberOfRowsNotTransfered <= numberOfRowsNotTransfered - 12'd16;
+        else if(sum >= 3)
+            numberOfRowsNotTransfered <= (numberOfRowsNotTransfered >= 12'd16) ? numberOfRowsNotTransfered - 12'd16 : 12'd0;
         else
             numberOfRowsNotTransfered <= numberOfRowsNotTransfered;
     end
@@ -922,37 +924,43 @@
                             gState <= gINITIAL;
                     end
                     gREAD_UP_FACE: begin //gREAD_UP_FACE
-                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                        if(remainRowsSubsOne == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_DOWN_FACE;
                         else
                             gState <= gREAD_UP_FACE;
                     end
                     gREAD_DOWN_FACE: begin
-                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                        if(remainRowsSubsOne == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_UP_GROUP;
                         else
                             gState <= gREAD_DOWN_FACE;
                     end
                     gREAD_UP_GROUP: begin
-                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                        if(remainRowsSubsOne == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_DOWN_GROUP;
                         else
                             gState <= gREAD_UP_GROUP;
                     end
                     gREAD_DOWN_GROUP: begin
-                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                        if(remainRowsSubsOne == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gREAD_EXTRA_SIXTEEN_ROWS;
                         else
                             gState <= gREAD_DOWN_GROUP;
                     end
                     gREAD_EXTRA_SIXTEEN_ROWS: begin
-                        if(remainRows == 5'b0 && mst_exec_state == COMPLETE)
+                        if(remainRowsSubsOne == 5'b0 && mst_exec_state == COMPLETE)
                             gState <= gCOMPUTE;
                         else
                             gState <= gREAD_EXTRA_SIXTEEN_ROWS;
                     end
                     gCOMPUTE: begin
-                        gState <= gCOMPUTE;
+                        if(yIndexNow == MAX_Y_POS)
+                            gState <= ( xIndexNow == MAX_X_POS ) ? gCOMPLETE : gREAD_UP_GROUP;
+                        else
+                            gState <= gCOMPUTE;
+                    end
+                    gCOMPLETE: begin
+                        gState <= gINITIAL;
                     end
                     default: begin
                         gState <= gINITIAL;
@@ -961,11 +969,29 @@
             end
     end
 
-    assign sum = gState * (mst_exec_state + remainRows == 5'd3);
+    always @ (posedge M_AXI_ACLK) begin
+        if(M_AXI_ARESETN == 1'b0)
+            hw_done <= 1'b0;
+        else
+            hw_done <= (gState == gCOMPLETE) ? 1'b1 : 1'b0;
+    end
 
+    assign sum = gState * (mst_exec_state == 5'd3 && remainRowsSubsOne == 5'd0);
+
+    // always block for shiftDatatSignal signal
+    always @ (posedge M_AXI_ACLK) begin
+        if(sum == 16'd5 || pipelineTransferDoneSignal == 1'b1)
+            shiftDatatSignal <= 1'b1;
+        else if(cCounter == 5'd15)
+            shiftDatatSignal <= 1'b0;
+        else
+            shiftDatatSignal <= shiftDatatSignal;
+    end
+
+    // always block for moving data from transferBuffer to faceBuffer
     always @ ( posedge M_AXI_ACLK ) begin
         case (sum)
-            32'd1: begin
+            16'd1: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         faceBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
@@ -1037,7 +1063,7 @@
                         faceBuffer[outerLoopIndex][31] <= faceBuffer[outerLoopIndex][31];
                     end
             end
-            32'd2: begin
+            16'd2: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         faceBuffer[outerLoopIndex][0] <= faceBuffer[outerLoopIndex][0];
@@ -1149,9 +1175,10 @@
         endcase
     end
 
+    // always block for moving data from transferBuffer to groupBuffer
     always @ ( posedge M_AXI_ACLK ) begin
         case(sum)
-            32'd3: begin
+            16'd3: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         groupBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
@@ -1223,7 +1250,7 @@
                         groupBuffer[outerLoopIndex][31] <= groupBuffer[outerLoopIndex][31];
                     end
             end
-            32'd4: begin
+            16'd4: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         groupBuffer[outerLoopIndex][0] <= groupBuffer[outerLoopIndex][0];
@@ -1335,9 +1362,10 @@
         endcase
     end
 
+    // always block for moving data from transferBuffer to newRowsBuffer
     always @ (posedge M_AXI_ACLK) begin
         case(sum)
-            32'd5: begin
+            16'd5: begin
                 for(outerLoopIndex = 0; outerLoopIndex < TRANSFER_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
                     begin
                         newRowsBuffer[outerLoopIndex][0] <= transferBuffer[outerLoopIndex][0];
@@ -1413,20 +1441,108 @@
             end
         endcase
     end
-    // Computation finite machine
-    /*always @ (posedge M_AXI_ACLK) begin
-        if(M_AXI_ARESETN)
+
+    // always block for startPipelineTransferSignal signal
+    always @ (posedge M_AXI_ACLK) begin
+        if(M_AXI_ACLK == 1'b0)
+            startPipelineTransferSignal <= 1'b0;
+        else if(startPipelineTransferSignal == 1'b1)
+            startPipelineTransferSignal <= 1'b0;
+        else if(startAdderSignal && numberOfRowsNotTransfered > 12'd0)
+            startPipelineTransferSignal <= 1'b1;
+        else
+            startPipelineTransferSignal <= 1'b0;
+    end
+
+    // always block for pipelineTransferDoneSignal signal
+    always @ (posedge M_AXI_ACLK) begin
+        if(pipelineTransferDoneSignal == 1'b1)
+            pipelineTransferDoneSignal <= 1'b0;
+        //else if(startAdderSignal == 1'b1) // This logic needs to be fixed
+        else if(sum == 16'd6)
+            pipelineTransferDoneSignal <= 1'b1;
+        else
+            pipelineTransferDoneSignal <= 1'b0;
+    end
+
+    // Pipelien transfer 16 new rows finite state machine
+    always @ (posedge M_AXI_ACLK) begin
+        if(M_AXI_ARESETN == 1'b0)
+            pState <= ptIDLE;
+        else
+            case (pState)
+                ptIDLE: begin
+                    pState <= (startPipelineTransferSignal) ? ptTRANSFER : ptIDLE;
+                end
+                ptTRANSFER: begin
+                    pState <= (pipelineTransferDoneSignal) ? ptIDLE : ptTRANSFER;
+                end
+                default: begin
+                    pState <= ptIDLE;
+                end
+            endcase
+    end
+
+    // always block for startAdderSignal signal
+    always @ (posedge M_AXI_ACLK) begin
+        if(startAdderSignal == 1'b1)
+            startAdderSignal <= 1'b0;
+        else if(sum == 16'd5 || pipelineTransferDoneSignal == 1'b1)
+            startAdderSignal <= 1'b1;
+        else
+            startAdderSignal <= 1'b0;
+    end
+
+    // always block for reachBottomSignal signal
+    always @ (posedge M_AXI_ACLK) begin
+        if(gState == gINITIAL || reachBottomSignal)
+            reachBottomSignal <= 1'b0;
+        else if(yIndexNow == MAX_Y_POS && xIndexNow != MAX_X_POS)
+            reachBottomSignal <= 1'b1;
+        else
+            reachBottomSignal <= 1'b0;
+    end
+
+    // Computation finite state machine
+    always @ (posedge M_AXI_ACLK) begin
+        if(gState == gREAD_EXTRA_SIXTEEN_ROWS)
             cState <= cINITIAL;
         else
-            begin
-                case(cState)
-                    default: begin
+            case(cState)
+                cINITIAL: begin
+                    cState <= (startAdderSignal) ? cFIRST_ROUND_COMPUTATION : cINITIAL;
+                end
+                cFIRST_ROUND_COMPUTATION: begin
+                    cState <= (reachBottomSignal) ? cINITIAL : ( (cCounter == 5'd4) ? cCOMPARE_SAD : cFIRST_ROUND_COMPUTATION );
+                end
+                cCOMPARE_SAD: begin
+                    cState <= (reachBottomSignal) ? cINITIAL : ( (cCounter == 5'd20) ? cSIXTEEN_ROWS_DONE : cCOMPARE_SAD );
+                end
+                cSIXTEEN_ROWS_DONE: begin
+                    cState <= (reachBottomSignal) ? cINITIAL : ( (pipelineTransferDoneSignal) ? cINITIAL : cSIXTEEN_ROWS_DONE );
+                end
+                default: begin
+                    cState <= cINITIAL;
+                end
+            endcase
+    end
 
-                    end
-                endcase
+    // always block for cCounter
+    always @ (posedge M_AXI_ACLK) begin
+        case (cState)
+            cINITIAL: begin
+                cCounter <= 5'd0;
             end
-    end*/
+            cSIXTEEN_ROWS_DONE: begin
+                cCounter <= cCounter;
+            end
+            default: begin
+                cCounter <= (reachBottomSignal) ? 5'd0 : cCounter + 5'd1;
+            end
+        endcase
+    end
 
+    // Combinational circuit for computing absolute difference
     generate
         for(genOuterIndex = 0; genOuterIndex < FACE_BUFFER_HEIGHT; genOuterIndex = genOuterIndex + 1)
             begin:diff
@@ -1529,78 +1645,114 @@
             end
     endgenerate
 
+    // always block for 1st-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
-        for(outerLoopIndex = 0; outerLoopIndex < FACE_BUFFER_HEIGHT / 4; outerLoopIndex = outerLoopIndex + 1)
+        for(outerLoopIndex = 0; outerLoopIndex < 256; outerLoopIndex = outerLoopIndex + 1)
             begin
                 for(innerLoopIndex = 0; innerLoopIndex < FACE_BUFFER_WIDTH; innerLoopIndex = innerLoopIndex + 4)
                     begin
-                        adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
+                        adderResult_0[outerLoopIndex]
                         <=
-                        absoluteDifference[outerLoopIndex][innerLoopIndex]
-                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
-                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
-                        + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
+                        absoluteDifference[outerLoopIndex / 8][innerLoopIndex]
+                        + absoluteDifference[outerLoopIndex / 8][innerLoopIndex + 1]
+                        + absoluteDifference[outerLoopIndex / 8][innerLoopIndex + 2]
+                        + absoluteDifference[outerLoopIndex / 8][innerLoopIndex + 3];
                     end
-            end
-        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4; outerLoopIndex < FACE_BUFFER_HEIGHT / 4 * 2; outerLoopIndex = outerLoopIndex + 1)
-            begin
-                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
-                <=
-                absoluteDifference[outerLoopIndex][innerLoopIndex]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
-            end
-        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4 * 2; outerLoopIndex < FACE_BUFFER_HEIGHT / 4 * 3; outerLoopIndex = outerLoopIndex + 1)
-            begin
-                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
-                <=
-                absoluteDifference[outerLoopIndex][innerLoopIndex]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
-            end
-        for(outerLoopIndex = FACE_BUFFER_HEIGHT / 4 * 3; outerLoopIndex < FACE_BUFFER_HEIGHT; outerLoopIndex = outerLoopIndex + 1)
-            begin
-                adderResult_0[(outerLoopIndex * FACE_BUFFER_WIDTH + innerLoopIndex) / 4]
-                <=
-                absoluteDifference[outerLoopIndex][innerLoopIndex]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 1]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 2]
-                + absoluteDifference[outerLoopIndex][innerLoopIndex + 3];
             end
     end
 
+    // always block for 2nd-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < 64; outerLoopIndex = outerLoopIndex + 1)
             begin
-                adderResult_1[outerLoopIndex] <= adderResult_0[outerLoopIndex * 2] + adderResult_0[outerLoopIndex * 2 + 1];
+                adderResult_1[outerLoopIndex]
+                <=
+                adderResult_0[outerLoopIndex * 2]
+                + adderResult_0[outerLoopIndex * 2 + 1]
+                + adderResult_0[outerLoopIndex * 2 + 2]
+                + adderResult_0[outerLoopIndex * 2 + 3];
             end
     end
 
+    // always block for 3rd-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < 16; outerLoopIndex = outerLoopIndex + 1)
             begin
-                adderResult_2[outerLoopIndex] <= adderResult_1[outerLoopIndex * 2] + adderResult_1[outerLoopIndex * 2 + 1];
+                adderResult_2[outerLoopIndex]
+                <=
+                adderResult_1[outerLoopIndex * 2]
+                + adderResult_1[outerLoopIndex * 2 + 1]
+                + adderResult_1[outerLoopIndex * 2 + 2]
+                + adderResult_1[outerLoopIndex * 2 + 3];
             end
     end
 
+    // always block for 4th-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
         for(outerLoopIndex = 0; outerLoopIndex < 4; outerLoopIndex = outerLoopIndex + 1)
             begin
-                adderResult_3[outerLoopIndex] <= adderResult_2[outerLoopIndex * 2] + adderResult_2[outerLoopIndex * 2 + 1];
+                adderResult_3[outerLoopIndex]
+                <=
+                adderResult_2[outerLoopIndex * 2]
+                + adderResult_2[outerLoopIndex * 2 + 1]
+                + adderResult_2[outerLoopIndex * 2 + 2]
+                + adderResult_2[outerLoopIndex * 2 + 3];
             end
     end
 
+    // always block for 5th-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
         adderResult_4 <= adderResult_3[0] + adderResult_3[1] + adderResult_3[2] + adderResult_3[3];
     end
 
+    // always block for xIndexNow
+    always @ ( posedge M_AXI_ACLK ) begin
+        if(gState == gINITIAL || xIndexNow == MAX_X_POS)
+            xIndexNow <= 12'd0;
+        else if(yIndexNow == MAX_Y_POS)
+            xIndexNow <= xIndexNow + 32'd1;
+        else
+            xIndexNow <= xIndexNow;
+    end
+
+    // always block for yIndexNow
+    always @ ( posedge M_AXI_ACLK ) begin
+        if(gState == gINITIAL || yIndexNow == MAX_Y_POS)
+            yIndexNow <= 12'd0;
+        else if(cCounter >= 5'd4 && cCounter <= 5'd19)
+            yIndexNow <= yIndexNow + 32'd1;
+        else
+            yIndexNow <= yIndexNow;
+    end
+
+    // always block for yIndexAns
     always @ (posedge M_AXI_ACLK) begin
-        if(M_AXI_ARESETN == 1'b0)
-            miniSAD <= 32'hFFFFFFFF;
-        else //Need to be fixed
-            miniSAD <= 32'd0;
+        if(gState == gINITIAL)
+            yIndexAns <= 32'd0;
+        else if(cCounter >= 5'd4 && cCounter <= 5'd19)
+            yIndexAns <= (miniSAD > adderResult_4) ? yIndexNow : yIndexAns;
+        else
+            yIndexAns <= yIndexAns;
+    end
+
+    // always block for xIndexAns
+    always @ (posedge M_AXI_ACLK) begin
+        if(gState == gINITIAL)
+            xIndexAns <= 32'd0;
+        else if(cCounter >= 5'd4 && cCounter <= 5'd19)
+            xIndexAns <= (miniSAD > adderResult_4) ? xIndexNow : xIndexAns;
+        else
+            xIndexAns <= xIndexAns;
+    end
+
+    // always block for miniSAD
+    always @ (posedge M_AXI_ACLK) begin
+        if(gState == gINITIAL)
+            miniSAD <= 32'hffffffff;
+        else if(cCounter >= 5'd4 && cCounter <= 5'd19)
+            miniSAD <= (miniSAD > adderResult_4) ? adderResult_4 : miniSAD;
+        else
+            miniSAD <= miniSAD;
     end
 
     // User logic ends
