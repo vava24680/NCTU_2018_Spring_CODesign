@@ -240,7 +240,7 @@
     reg      axi_wlast;
     reg      axi_wvalid;
     reg      axi_bready;
-    reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
+    (* mark_debug = "true" *)reg [C_M_AXI_ADDR_WIDTH-1 : 0]     axi_araddr;
     reg      axi_arvalid;
     reg      axi_rready;
     //write beat count in a burst
@@ -281,8 +281,8 @@
     reg [C_M_AXI_DATA_WIDTH - 1 : 0] adderResult_4;
     (* mark_debug = "true" *)reg [12 - 1 : 0] yIndexNow; //Range from 0 to 1047, represent the the upper left y-coordinate of the rectangle computating.
     (* mark_debug = "true" *)reg [12 - 1 : 0] xIndexNow; //Range from 0 to 1887, represent the the upper left x-coordinate of the rectanble computating.
-    (* mark_debug = "true" *)reg [12 - 1 : 0] yIndexAns;
-    (* mark_debug = "true" *)reg [12 - 1 : 0] xIndexAns;
+    reg [12 - 1 : 0] yIndexAns;
+    reg [12 - 1 : 0] xIndexAns;
     (* mark_debug = "true" *)reg [32 - 1 : 0] miniSAD;
     reg [8 - 1 : 0] i_index;
     reg [8 - 1 : 0] j_index;
@@ -619,11 +619,9 @@
                     axi_araddr <= axi_araddr + GROUP_WIDTH;
                 end
                 gCOMPUTE: begin
-                    axi_araddr <= (reachBottomSignal) ? axi_araddr - GROUP_WIDTH * GROUP_HEIGHT + 1 : axi_araddr + 32'd1920;
+                    //axi_araddr <= (reachBottomSignal) ? axi_araddr - GROUP_WIDTH * GROUP_HEIGHT + 1 : axi_araddr + 32'd1920;
                     //M_AXI_ARREADY, axi_arvalid and reachBottomSignal won't happen to be 1 at the same clock cycle
-                    axi_araddr <= ( (axi_araddr - group_src_addr) == (GROUP_HEIGHT - 1) * GROUP_WIDTH )
-                    ? axi_araddr - GROUP_WIDTH * (GROUP_HEIGHT - 1) + 1
-                    : axi_araddr + 32'd1920;
+                    axi_araddr <= ( (axi_araddr - group_src_addr) == ( (GROUP_HEIGHT - 1) * GROUP_WIDTH ) ) ? (axi_araddr - ( 32'd1920 * 32'd1079 ) + 32'd1) : axi_araddr + 32'd1920;
                 end
                 default: begin
                     axi_araddr <= axi_araddr;
@@ -1992,22 +1990,26 @@
 
     // always block for 3rd-stage adder tree
     always @ (posedge M_AXI_ACLK) begin
-        adderResult_2[0] <= adderResult_1[0] + adderResult_1[1] + adderResult_1[2] + adderResult_1[3];
-        adderResult_2[1] <= adderResult_1[4] + adderResult_1[5] + adderResult_1[6] + adderResult_1[7];
-        adderResult_2[2] <= adderResult_1[8] + adderResult_1[9] + adderResult_1[10] + adderResult_1[11];
-        adderResult_2[3] <= adderResult_1[12] + adderResult_1[13] + adderResult_1[14] + adderResult_1[15];
-        adderResult_2[4] <= adderResult_1[16] + adderResult_1[17] + adderResult_1[18] + adderResult_1[19];
-        adderResult_2[5] <= adderResult_1[20] + adderResult_1[21] + adderResult_1[22] + adderResult_1[23];
-        adderResult_2[6] <= adderResult_1[24] + adderResult_1[25] + adderResult_1[26] + adderResult_1[27];
-        adderResult_2[7] <= adderResult_1[28] + adderResult_1[29] + adderResult_1[30] + adderResult_1[31];
-        adderResult_2[8] <= adderResult_1[32] + adderResult_1[33] + adderResult_1[34] + adderResult_1[35];
-        adderResult_2[9] <= adderResult_1[36] + adderResult_1[37] + adderResult_1[38] + adderResult_1[39];
-        adderResult_2[10] <= adderResult_1[40] + adderResult_1[41] + adderResult_1[42] + adderResult_1[43];
-        adderResult_2[11] <= adderResult_1[44] + adderResult_1[45] + adderResult_1[46] + adderResult_1[47];
-        adderResult_2[12] <= adderResult_1[48] + adderResult_1[49] + adderResult_1[50] + adderResult_1[51];
-        adderResult_2[13] <= adderResult_1[52] + adderResult_1[53] + adderResult_1[54] + adderResult_1[55];
-        adderResult_2[14] <= adderResult_1[56] + adderResult_1[57] + adderResult_1[58] + adderResult_1[59];
-        adderResult_2[15] <= adderResult_1[60] + adderResult_1[61] + adderResult_1[62] + adderResult_1[63];
+        for(outerLoopIndex_2 = 0; outerLoopIndex_2 < 16; outerLoopIndex_2 = outerLoopIndex_2 + 1)
+            begin
+                adderResult_2[outerLoopIndex_2] <= adderResult_1[outerLoopIndex_2 * 4] + adderResult_1[outerLoopIndex_2 * 4 + 1] + adderResult_1[outerLoopIndex_2 * 4 + 2] + adderResult_1[outerLoopIndex_2 * 4 +  3];
+            end
+            /*adderResult_2[0] <= adderResult_1[0] + adderResult_1[1] + adderResult_1[2] + adderResult_1[3];
+            adderResult_2[1] <= adderResult_1[4] + adderResult_1[5] + adderResult_1[6] + adderResult_1[7];
+            adderResult_2[2] <= adderResult_1[8] + adderResult_1[9] + adderResult_1[10] + adderResult_1[11];
+            adderResult_2[3] <= adderResult_1[12] + adderResult_1[13] + adderResult_1[14] + adderResult_1[15];
+            adderResult_2[4] <= adderResult_1[16] + adderResult_1[17] + adderResult_1[18] + adderResult_1[19];
+            adderResult_2[5] <= adderResult_1[20] + adderResult_1[21] + adderResult_1[22] + adderResult_1[23];
+            adderResult_2[6] <= adderResult_1[24] + adderResult_1[25] + adderResult_1[26] + adderResult_1[27];
+            adderResult_2[7] <= adderResult_1[28] + adderResult_1[29] + adderResult_1[30] + adderResult_1[31];
+            adderResult_2[8] <= adderResult_1[32] + adderResult_1[33] + adderResult_1[34] + adderResult_1[35];
+            adderResult_2[9] <= adderResult_1[36] + adderResult_1[37] + adderResult_1[38] + adderResult_1[39];
+            adderResult_2[10] <= adderResult_1[40] + adderResult_1[41] + adderResult_1[42] + adderResult_1[43];
+            adderResult_2[11] <= adderResult_1[44] + adderResult_1[45] + adderResult_1[46] + adderResult_1[47];
+            adderResult_2[12] <= adderResult_1[48] + adderResult_1[49] + adderResult_1[50] + adderResult_1[51];
+            adderResult_2[13] <= adderResult_1[52] + adderResult_1[53] + adderResult_1[54] + adderResult_1[55];
+            adderResult_2[14] <= adderResult_1[56] + adderResult_1[57] + adderResult_1[58] + adderResult_1[59];
+            adderResult_2[15] <= adderResult_1[60] + adderResult_1[61] + adderResult_1[62] + adderResult_1[63];*/
     end
 
     // always block for 4th-stage adder tree
